@@ -1,2 +1,7 @@
 build/
 dist/
+scorpion.egg-info/
+clique/
+scorpion/figs/
+hybrid/
+*.pyc
