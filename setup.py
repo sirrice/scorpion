@@ -25,7 +25,7 @@ setup(name="scorpion",
       },
       install_requires = [
         'flask', 'psycopg2', 'sqlalchemy', 
-        'orange', 'numpy', 'scipy', 'sklearn',
+        'Orange', 'numpy', 'scipy', 'sklearn',
         'matplotlib', 'bsddb', 'pyparsing', 
         'monetdb', 'pymongo', 'rtree'
       ],
