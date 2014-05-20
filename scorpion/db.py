@@ -2,15 +2,19 @@ import sys
 import pdb
 
 from sqlalchemy import *
-from monetdb import sql as msql
 import psycopg2
+
+try:
+  from monetdb import sql as msql
+except:
+  msql = None
 
 def connect(dbname, engine='pg'):
     try:
-      if engine == 'monet' and dbname in ('intel', 'med'):
+      if msql and engine == 'monet' and dbname in ('intel', 'med'):
         db = msql.connect(user='monetdb', password='monetdb', hostname='localhost', database=dbname)
       else:
-        conn = "postgresql://sirrice@localhost:5432/%s" % dbname
+        conn = "postgresql://localhost/%s" % dbname
         db = create_engine(conn)
         #connection = "dbname='%s' user='sirrice' host='localhost' port='5432'" % (dbname)
         #db = psycopg2.connect(connection)

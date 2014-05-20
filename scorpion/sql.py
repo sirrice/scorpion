@@ -1,5 +1,4 @@
 import psycopg2
-import sqlparse
 from datetime import datetime, date
 
 from db import *

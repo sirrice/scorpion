@@ -112,7 +112,7 @@ class RangeMerger(Merger):
       self.yrange = [miny, maxy]
       reset_ax(ax, self.c_range, (miny, maxy))
       render_fulls(ax, clusters, xs, 'grey', .2)
-      fig.savefig('/Users/sirrice/infs-0.pdf')
+      fig.savefig('/tmp/infs-0.pdf')
 
 
     frontier, removed_clusters = self.get_frontier(clusters)
@@ -123,7 +123,7 @@ class RangeMerger(Merger):
       reset_ax(ax, self.c_range, (miny, maxy))
       render_fulls(ax, removed_clusters, xs, 'grey', .2)
       render_segs(ax, frontier, 'red', .4)
-      fig.savefig("/Users/sirrice/infs-01.pdf")
+      fig.savefig("/tmp/infs-01.pdf")
       print self.get_frontier.stats.items()
       print self.get_frontier.heap.stats.items()
 
@@ -147,7 +147,7 @@ class RangeMerger(Merger):
         self.print_clusters(new_clusters)
         render_fulls(ax, removed_clusters, xs, 'grey', .2)
         render_segs(ax, new_clusters, 'red', .4)
-        fig.savefig("/Users/sirrice/infs-%02d.pdf" % iteridx)
+        fig.savefig("/tmp/infs-%02d.pdf" % iteridx)
 
       if (not new_clusters.difference(frontier)) or (time.time() - start) > 60:
         clusters_set = set(removed_clusters)
@@ -345,7 +345,7 @@ class RangeMerger(Merger):
       render_segs(self.ax, [c], 'red', .4)
       self.ax.set_title(str(c.rule)[:50])
       self.ax.title.set_fontsize(6)
-      self.fig.savefig('/Users/sirrice/expand-%02d.pdf' % self.i)
+      self.fig.savefig('/tmp/expand-%02d.pdf' % self.i)
       self.i += 1
 
 
