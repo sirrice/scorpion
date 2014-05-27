@@ -236,8 +236,8 @@ class MR(Basic):
       self.cost_merge = time.time() - start
 
       self.costs = {
-              'cost_clique' : self.cost_clique,
-              'cost_merge' : self.cost_merge
+        'cost_clique' : self.cost_clique,
+        'cost_merge' : self.cost_merge
       }
 
       return self.final_clusters
@@ -257,13 +257,13 @@ class MR(Basic):
       self.bad_thresh = max(self.bad_thresh, 0.01 * self.max_bad_inf)
 
       if ro.npts < self.min_pts:
-          _logger.debug("%s\t%s", 'FALSE', str(ro))
+          _logger.debug("prune? %s\t%s", 'FALSE', str(ro))
           return False
       
       if (math.isnan(ro.bad_inf) or
           math.isnan(ro.good_inf) or
           math.isnan(ro.inf)):
-          _logger.debug("%s\t%s", 'FALSE', str(ro))
+          _logger.debug("prune? %s\t%s", 'FALSE', str(ro))
           return False
       
       # check min bad influence
@@ -276,6 +276,7 @@ class MR(Basic):
       # the full c_range?
       if self.best:
         if ro.dominated_by(max(self.best)):
+          _logger.debug("prune? %s\t%s", 'FALSE', str(ro))
           return False
 
       #if self.best and ro.best_inf <= max(self.best).inf:

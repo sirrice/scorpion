@@ -68,6 +68,15 @@ class RangeMerger(Merger):
     self.i = 0
     self.yrange = None
 
+
+    #
+    # per execution state
+    #
+
+    # dim -> list of value subsets that were not on frontier
+    # e.g., subregion -> [ (SR1, SR2), (SR3), ... ]
+    self.rejected_disc_vals = defaultdict(list)
+
   def __hash__(self):
     return hash((self.learner_hash, tuple(self.c_range)))
 
@@ -84,6 +93,8 @@ class RangeMerger(Merger):
       c.c_range = list(self.c_range)
       c.inf_range = [c.inf_func(c.c_range[0]), c.inf_func(c.c_range[1])]
 
+    self.rejected_disc_vals = defaultdict(list)
+
   def print_clusters(self, clusters):
     rules = clusters_to_rules(clusters, self.learner.full_table)
     rules = ['%.4f-%.4f %s' % (r.c_range[0], r.c_range[1], r) for r in rules]
@@ -96,6 +107,7 @@ class RangeMerger(Merger):
         return list(clusters)
 
     _logger.debug("merging %d clusters", len(clusters))
+    _logger.debug("DEBUG = %s", self.DEBUG)
 
     self.set_params(**kwargs)
     self.setup_stats(clusters)
@@ -143,7 +155,7 @@ class RangeMerger(Merger):
       new_clusters, removed_clusters = self.expand_frontier(frontier, seen)
 
       if self.DEBUG:
-        print "new clusters"
+        print "\nnew clusters"
         self.print_clusters(new_clusters)
         render_fulls(ax, removed_clusters, xs, 'grey', .2)
         render_segs(ax, new_clusters, 'red', .4)
@@ -199,6 +211,14 @@ class RangeMerger(Merger):
 
   @instrument
   def disc_merge(self, cluster, dim, vals, skip=None):
+    # reject if union is a superset of anything in 
+    # rejected_disc_vals
+    vals = set(vals)
+    vals.update(cluster.discretes.get(dim, ()))
+    for subset in self.rejected_disc_vals[dim]:
+      if vals.issuperset(subset):
+        return None
+
     merged = Merger.disc_merge(self, cluster, dim, vals, skip)
     if merged:
       merged.c_range = list(self.c_range)
@@ -224,14 +244,7 @@ class RangeMerger(Merger):
       bests = set([cur])
       prev_card = None
       for cand in g:
-        #if prev_cand is None or prev_card == len(cand_discretes[dim]):
-        #  cands.append(cand)
-        #else:
-        #  nbests = len(bests)
-        #  bests.update(cands)
-        #  newbests, _ = self.get_frontier(bests)
-        #  if all([(c not in bests) for c in cands]):
-        #    break
+        cands.append(cand)
         bests.add(cand)
         bests, _ = self.get_frontier(bests)
         if cand not in bests:
@@ -251,11 +264,22 @@ class RangeMerger(Merger):
           break
       bests = [cur] + cands
 
+    # update rejection state
+    for c in cands:
+      if c in bests: continue
+      self.rejected_disc_vals[dim].append(set(c.discretes[dim]))
 
     if self.DEBUG:
       if direction == 'disc':
         name = dim[:10]
         s = ','.join([str(len(c.discretes[dim])) for c in bests])
+        ss = ','.join([str(c.discretes[dim]) for c in cands])
+        if 'subregion' in str(cur):
+          for c in cands:
+            isbest = False
+            if c in bests:
+              isbest = True
+            _logger.debug('\tbest? %s\tcand:\t%s', isbest, c)
       else:
         name = cur.cols[dim][:10]
         if bests:
@@ -267,8 +291,10 @@ class RangeMerger(Merger):
             s = '%s - %.4f' % (s, bests[0].bbox[1][dim])
         else:
           s = '---'
-      _logger.debug("\t%s\t%s\t%d candidates", name, direction, len(cands))
-      _logger.debug("\t%s\t%s\t%s", name, direction, s)
+        ss = ''
+      _logger.debug("\t%s\t%s\t%d bests\t%d candidates", name, direction, len(bests), len(cands))
+      _logger.debug("\tbests\t\t\t\t%s", s)
+      _logger.debug("\tcands\t\t\t\t%s", ss)
 
 
     return bests
@@ -286,6 +312,7 @@ class RangeMerger(Merger):
     """
     _logger.debug("expand\t%s", str(c.rule)[:100])
     start = time.time()
+    self.rejected_disc_vals = defaultdict(list)
     cur_bests = set([c])
     ret = set()
     rms = set()
@@ -300,7 +327,7 @@ class RangeMerger(Merger):
         _logger.debug("seen \t%s", str(cur.rule)[:100])
         continue
       seen.add(hash(cur))
-      _logger.debug("expand\tsub\t%s", str(cur.rule)[:100])
+      _logger.debug("expand\tsub\t%.3f-%.3f\t%s", cur.c_range[0], cur.c_range[1],  str(cur.rule)[:100])
 
 
       dim_to_bests = self.greedy_expansion(cur, seen)#.union(all_merges))
@@ -308,7 +335,6 @@ class RangeMerger(Merger):
       merges = list()
       map(merges.extend, dim_to_bests.values())
       all_merges.update(map(hash, merges))
-      #if 'attend' in str(cur):pdb.set_trace()
       merges = set(filter(lambda c: r_vol(c.c_range), merges))
       if cur in merges:
         _logger.debug("cur added to bests")

@@ -122,11 +122,6 @@ def serial_hybrid(obj, aggerr, **kwargs):
           'max_wait':5,
           'DEBUG': False
         }
-        # msethreshold=0.01,
-        # k=10,
-        # nprocesses=4,
-        # parallelize=True,
-        # complexity_multiplier=1.5}
 
         params.update(dict(kwargs))
 
