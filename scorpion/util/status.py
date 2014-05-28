@@ -34,7 +34,6 @@ class Status(object):
     if self.reqid is not None: 
       q = "select count(*) from requests where id = %s"
       count = self.db.execute(q, self.reqid).fetchone()[0] 
-      print 'status count', count
       if count > 0: 
         return self.reqid
     q = "insert into requests values (default) returning id"
@@ -48,8 +47,6 @@ class Status(object):
   def latest_status(self):
     q = "select status from status where reqid = %s order by id desc limit 1"
     rows = self.db.execute(q, self.reqid).fetchall()
-    print q
-    print rows
     if len(rows):
       return rows[0][0]
     return 'no status yet'
