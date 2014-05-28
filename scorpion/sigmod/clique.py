@@ -116,7 +116,9 @@ class MR(Basic):
     def __call__(self, full_table, bad_tables, good_tables, **kwargs):
       self.setup_tables(full_table, bad_tables, good_tables, **kwargs)
 
+      self.update_status("running bottom up algorithm")
       clusters = self.find_cliques()
+      self.update_status("merging partitions")
       clusters = self.merge_rules(clusters)
       clusters = filter(lambda c: r_vol(c.c_range), clusters)
       clusters.sort(reverse=True)
@@ -145,6 +147,7 @@ class MR(Basic):
       niters = 0 
       while niters < self.max_complexity and not self.stop and (rules is None or rules):
           niters += 1
+          self.update_status("running bottomup iter %d" % niters)
           _logger.debug("=========iter %d=========", niters)
           besthash = hash(tuple(self.best))
 
@@ -197,6 +200,7 @@ class MR(Basic):
       for bests in self.opts_per_iter:
           bests.sort(reverse=True)
           ret.extend(bests)# self.merge_rules(bests))
+      self.update_status("computing partition influences")
       clusters = map(self.blah_to_cluster, ret)
 
       self.cache_results(clusters)
@@ -329,6 +333,7 @@ class MR(Basic):
       try:
         myhash = str(hash(self))
         if myhash in self.cache and self.use_cache:
+          self.update_status("loading partitions from cache")
           dicts, errors = json.loads(self.cache[myhash])
           clusters = map(Cluster.from_dict, dicts)
           for c in clusters:
