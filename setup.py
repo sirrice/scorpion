@@ -17,7 +17,9 @@ setup(name="scorpion",
       include_package_data = True,      
       packages = find_packages(),
       package_dir = {'scorpion' : 'scorpion'},
-      #scripts = ['scorpion/server.py'],
+      scripts = [
+        'tests/adjgraph.py'
+      ],
       package_data = {
         'scorpion': [
           'jars/*'
@@ -25,8 +27,7 @@ setup(name="scorpion",
       },
       install_requires = [
         'flask', 'psycopg2', 'sqlalchemy', 
-        'Orange', 'numpy', 'scipy', 'sklearn',
-        'matplotlib', 'bsddb', 'pyparsing', 
-        'monetdb', 'pymongo', 'rtree'
+        'Orange', 'numpy', 'scipy', 'scikit-learn',
+        'matplotlib', 'pyparsing', 'rtree'
       ],
       keywords= "")

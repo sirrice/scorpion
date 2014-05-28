@@ -27,6 +27,7 @@ class Basic(object):
 
 
   def __init__(self, **kwargs):
+    self.obj = kwargs.get('obj', None)
     self.aggerr = kwargs.get('aggerr', None)
     self.cols = list(self.aggerr.agg.cols)
     self.err_func = kwargs.get('err_func', self.aggerr.error_func.clone())
@@ -53,8 +54,6 @@ class Basic(object):
 
     self.tablename = kwargs.get('tablename', None)
 
-
-    
 
     self.scorer_cost = 0.
     self.merge_cost = 0.
@@ -111,6 +110,10 @@ class Basic(object):
     attrnames = [attr.name for attr in domain]
     self.cont_dists = dict(zip(attrnames, Orange.statistics.basic.Domain(self.full_table)))
     self.disc_dists = dict(zip(attrnames, Orange.statistics.distribution.Domain(self.full_table)))
+
+  def update_status(self, s):
+    if self.obj:
+      self.obj.update_status(s)
 
   def __call__(self, full_table, bad_tables, good_tables, **kwargs):
     """

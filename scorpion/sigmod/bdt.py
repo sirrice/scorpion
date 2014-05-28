@@ -117,6 +117,9 @@ class BDT(Basic):
             counter[newr] += 1
             str_to_rule[newr] = newr
 
+      if len(counter) == 0:
+        return []
+
       thresh = np.percentile(counter.values(), 80)
       rules = []
       for strrule, count in counter.iteritems():
@@ -154,6 +157,7 @@ class BDT(Basic):
         if len(clusters) <= 1:
             return clusters
 
+        self.update_status("starting merge phase")
         start = time.time()
         if [attr for attr in self.full_table.domain if attr.varType == orange.VarTypes.Discrete]:
           use_mtuples = self.use_mtuples
@@ -179,9 +183,11 @@ class BDT(Basic):
           c.error = self.influence_cluster(c)
         self.stats['init_cluster_errors'] = [time.time()-start, 1]
 
+
         #
         # Figure out what nonleafs to merge
         #
+        self.update_status("compting frontier")
         _logger.debug("compute initial frontier")
         self.merger.setup_stats(clusters)
         frontier, _ = self.merger.get_frontier(clusters)
@@ -195,6 +201,7 @@ class BDT(Basic):
               frontier.append(nonleaf)
               break
 
+        self.update_status("expanding frontier")
         _logger.debug("second merger pass")
         to_add.extend(clusters)
         merged_clusters = self.merger(to_add)
@@ -316,6 +323,7 @@ class BDT(Basic):
         # 
         # Setup and run partitioner for bad outputs
         #
+        self.update_status("partitioning bad examples")
         params = dict(self.params)
         params.update(kwargs)
         params['SCORE_ID'] = self.SCORE_ID
@@ -343,6 +351,7 @@ class BDT(Basic):
         # 
         # Setup and run partitioner for good outputs
         #
+        self.update_status("partitioning good examples")
         inf_bound = [inf, -inf]
         for ib in bpartitioner.inf_bounds:
           inf_bound = r_union(ib, inf_bound)
@@ -365,6 +374,7 @@ class BDT(Basic):
         _logger.debug( '\n'.join(map(str, sorted(leaves, key=lambda n: n.influence)[:10])))
 
 
+        self.update_status("reconciling partitions")
         start = time.time()
         popular_clusters = self.nodes_to_popular_clusters(nonleaves, full_table)
         nonleaf_clusters = self.nodes_to_clusters(nonleaves, full_table)
@@ -433,6 +443,7 @@ class BDT(Basic):
       import bsddb as bsddb3
       self.cache = bsddb3.hashopen('./dbwipes.cache')
       try:
+        self.update_status("loading partitions from cache")
         myhash = str(hash(self))
         if myhash in self.cache and self.use_cache:
           dicts, nonleaf_dicts, errors = json.loads(self.cache[myhash])

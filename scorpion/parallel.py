@@ -73,6 +73,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
     costs = {}
     db = connect(obj.dbname)
     obj.db = db
+    obj.update_status('loading inputs into memory')
     start = time.time()
     all_keys = list(chain(aggerr.keys, obj.goodkeys[aggerr.agg.shortname]))
     all_tables = get_provenance_split(obj, aggerr.agg.cols, all_keys)
@@ -88,6 +89,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
     cost, ncalls = 0, 0
     rules = []
     try:
+        obj.update_status('preparing inputs')
         full_start = time.time()
         start = time.time()
         cols = valid_table_cols(bad_tables[0], aggerr.agg.cols, kwargs)
@@ -110,9 +112,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
 
 
         params = {
-          'aggerr':aggerr,
-          'cols':cols,
-          'c': obj.c,
+          'obj': obj,
           'aggerr':aggerr,
           'cols':cols,
           'c': obj.c,
@@ -153,6 +153,8 @@ def serial_hybrid(obj, aggerr, **kwargs):
         start = time.time()
         hybrid = klass(**params)
         clusters = hybrid(all_full_table, bad_tables, good_tables)
+
+        obj.update_status('clustering results')
         rules = clusters_to_rules(clusters, full_table)
         print "nclusters: %d" % len(clusters)
         costs['rules_get'] = time.time() - start

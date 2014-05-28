@@ -10,7 +10,7 @@ def compute_bad_score(bds, bcs, c):
   if not bds: return -float('inf')
 
   # smoothing
-  smooth = .01
+  smooth = .0001
   bcs = [bc + smooth for bc in bcs]
   total = float(sum(bcs))
   if total == 0:

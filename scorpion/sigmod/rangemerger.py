@@ -20,7 +20,6 @@ from ..bottomup.cluster import *
 
 from crange import *
 from merger import Merger
-from adjgraph import AdjacencyGraph
 
 _logger = get_logger()
 
@@ -144,6 +143,7 @@ class RangeMerger(Merger):
     iteridx = 1
     seen = set()
     while len(frontier) > 0:#self.min_clusters:
+      self.learner.update_status("expanding frontier, iter %d" % iteridx)
       iteridx += 1
 
       if self.DEBUG:
@@ -168,6 +168,7 @@ class RangeMerger(Merger):
 
       map(self.adj_graph.remove, removed_clusters)
       map(self.adj_graph.insert, new_clusters)
+      self.adj_graph.new_version()
       frontier = new_clusters
 
     print "returning %d clusters total!" % len(clusters_set)
@@ -249,8 +250,8 @@ class RangeMerger(Merger):
         bests, _ = self.get_frontier(bests)
         if cand not in bests:
           seen.add(hash(cand))
-          if prev_card is not None and len(cand.discretes[dim]) != prev_card:
-            break
+          #if prev_card is not None and len(cand.discretes[dim]) != prev_card:
+          #  break
         prev_card = len(cand.discretes[dim])
       
     else:

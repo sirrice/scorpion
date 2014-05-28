@@ -331,6 +331,8 @@ class MR(Basic):
         if myhash in self.cache and self.use_cache:
           dicts, errors = json.loads(self.cache[myhash])
           clusters = map(Cluster.from_dict, dicts)
+          for c in clusters:
+            self.influence_cluster(c, self.full_table)
           return clusters
       except Exception as e:
         print e

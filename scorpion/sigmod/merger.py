@@ -83,42 +83,6 @@ class Merger(object):
     def setup_errors(self, clusters):
         return
 
-    def filter_discrete(self, c1, c2, intersecting_clusters):
-        return filter(c1.discretes_intersect,
-                      filter(c2.discretes_intersect, intersecting_clusters))
-
-    @instrument
-    def construct_rtree(self, clusters):
-        if not len(clusters[0].bbox[0]):
-            class k(object):
-                def intersection(self, foo):
-                    return xrange(len(clusters))
-            return k()
-        ndim = max(2, len(clusters[0].centroid))
-        p = RProp()
-        p.dimension = ndim
-        p.dat_extension = 'data'
-        p.idx_extension = 'index'
-
-        rtree = RTree(properties=p)
-        for idx, c in enumerate(clusters):
-            box = c.bbox #self.scale_box(c.bbox)
-            if ndim == 1:
-                rtree.insert(idx, box[0] + [0] + box[1] + [1])
-            else:
-                rtree.insert(idx, box[0] + box[1])
-        return rtree
-
-    @instrument
-    def get_intersection(self, bbox):
-        if len(bbox[0]) == 0:
-            return self.rtree.intersection([0, 0, 1, 1])
-
-        if len(bbox[0]) == 1:
-            return self.rtree.intersection(bbox[0] + (0,) + bbox[1] + (1,))
-        return self.rtree.intersection(bbox[0] + bbox[1])        
-
-
     def get_states(self, merged, intersecting_clusters):
         @instrument
         def update_states(self, weight, global_states, efs, states, cards):
@@ -285,9 +249,9 @@ class Merger(object):
             dim_to_incs[dim].add(maxv)
 
         disc_diffs = cluster.discrete_differences(n, epsilon=0.01)
-        if disc_diffs and len(disc_diffs) <= 1:
+        if disc_diffs:# and len(disc_diffs) <= 1:
           for dim, vals in disc_diffs.iteritems():
-            dim_to_discs[dim].add(tuple(vals))
+            dim_to_discs[dim].add(tuple(sorted(vals)))
       cost = time.time() - start
       self.stats['gather'][0] += cost
       self.stats['gather'][1] += 1
@@ -315,6 +279,7 @@ class Merger(object):
         yield (dim, 'dec', generator)
 
       for dim, discs in dim_to_discs.iteritems():
+        print dim, discs
         generator = (self.disc_merge(cluster, dim, disc)#, seen)
             for disc in sorted(discs, key=lambda d: len(d)))
         generator = ifilter(bool, generator)
@@ -483,8 +448,8 @@ class Merger(object):
 
 
     @instrument
-    def make_adjacency(self, *args, **kwargs):
-        return AdjacencyGraph(*args, **kwargs)
+    def make_adjacency(self, clusters, partitions_complete=True):
+        return AdjacencyGraph(clusters, self.learner.full_table.domain)
 
         
     def __call__(self, clusters, **kwargs):
@@ -501,10 +466,6 @@ class Merger(object):
         self.adj_graph = self.make_adjacency(clusters, self.partitions_complete)
 
 
-        # rtree is static (computed once) to find base partitions within 
-        # a merged partition
-        #_logger.debug("building rtree")
-        #self.rtree = self.construct_rtree(clusters)
 
         # load state from cache
         can_stop, clusters_set, mergable_clusters = self.load_from_cache(clusters)
@@ -573,6 +534,7 @@ class Merger(object):
 
           map(self.adj_graph.remove, merged_clusters)
           map(self.adj_graph.insert, new_clusters)
+          self.adj_graph.new_version()
           clusters_set.difference_update(merged_clusters)
           clusters_set.update(new_clusters)
           mergable_clusters = sorted(new_clusters, key=lambda c: c.error, reverse=True)

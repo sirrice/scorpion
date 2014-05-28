@@ -336,7 +336,6 @@ class BDTTablesPartitioner(Basic):
         if node.n == 0:
           return node
 
-
         #
         # Precompute influences and scores
         #

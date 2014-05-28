@@ -1,7 +1,9 @@
-from itertools import chain
+from ..learners.cn2sd.rule import SDRule
+from ..util import powerset
+from itertools import *
+
 
 inf = float('inf')
-
 
 class Node(object):
     def __init__(self, rule):
@@ -66,12 +68,33 @@ class Node(object):
     leaves = property(__leaves__)
 
     def __nonleaves__(self):
+      """
+      @deprecated
+      Return ancestors of the leaf nodes found in this tree
+      """
       if self.n is None:
         return []
       if not self.children:
         return []
       nodes = [child.nonleaves for child in self.children] + [[self]]
       return chain(*nodes)
+
+    def __nonleaves__(self):
+      """
+      Return all possible parents of the leaf nodes
+      e.g., if leaf node has conditions (a,b,c)
+            returns (a), (b), (c), (a,b), (a,c), (b,c), (a,b,c)
+      """
+      print "get nonleaves"
+      ret = set()
+      for leaf in self.leaves:
+        conds = leaf.rule.filter.conditions
+        for subset in powerset(conds):
+          if len(subset) == len(conds): continue
+          newrule = SDRule(leaf.rule.data, None, subset, leaf.rule.g)
+          ret.add(newrule)
+      print "done"
+      return map(Node, ret)
     nonleaves = property(__nonleaves__)
 
 
