@@ -139,6 +139,7 @@ class RangeMerger(Merger):
       print self.get_frontier.heap.stats.items()
 
 
+
     start = time.time()
     iteridx = 1
     seen = set()

@@ -33,24 +33,30 @@ class Query(object):
     def __str__(self):
         select = str(self.select)
         fr = ','.join(self.fr)
-        if self.where:
-            where = ' and '.join(self.where)
-        else:
-            where = None
-
+        where = self.wherestr
         
         sql = 'SELECT %s FROM %s' % (select, fr)
         if where:
             sql = '%s WHERE %s' % (sql, where)
         if self.group:
-            sql = '%s GROUP BY %s' % (sql, ','.join(self.group))
+            sql = '%s GROUP BY %s' % (sql, ','.join(list(self.group)))
         if self.order:
-            sql = '%s ORDER BY %s' % (sql, ','.join(self.order))
+            sql = '%s ORDER BY %s' % (sql, ','.join(list(self.order)))
         elif self.group:
-            sql = '%s ORDER BY %s' % (sql, ','.join(self.group))
+            sql = '%s ORDER BY %s' % (sql, ','.join(list(self.group)))
         if self.limit is not None:
             sql = '%s LIMIT %s' % (sql, self.limit)
         return sql
+
+    def __wherestr__(self, where=None):
+      if where is None:
+        where = self.where
+      where = filter(bool, list(where))
+      if not where: return None
+      where = ["(%s)" % clause for clause in where]
+      return " and ".join(where)
+    wherestr = property(__wherestr__)
+
 
     def to_outer_join_sql(self, orig_where = []):
       """
@@ -64,18 +70,17 @@ class Query(object):
       fr = ','.join(self.fr)
       filter_q = "SELECT * FROM %s" % fr
       if self.where:
-        where = ' and '.join(self.where)
-        filter_q += " WHERE %s" % where
+        filter_q += " WHERE %s" % self.wherestr
 
       select_clause = self.select.coalesced_str()
-      groupby = ','.join(self.group)
+      groupby = ','.join(list(self.group))
       if self.order:
-        orderby = ','.join(self.order)
+        orderby = ','.join(list(self.order))
       else:
         orderby = groupby
 
       if orig_where:
-        orig_where = ' and '.join(orig_where)
+        orig_where = self.__wherestr__(orig_where)
         orig_where = ' WHERE %s' % orig_where
       else:
         orig_where = ''
@@ -104,25 +109,23 @@ class Query(object):
     def prettify(self):
         select = str(self.select)
         fr = ','.join(self.fr)
-        if self.where:
-            where = ' and '.join(self.where)
-        else:
-            where = None
-
+        where = self.wherestr
         
         sql = 'SELECT %s\nFROM %s' % (select, fr)
         if where:
             sql = '%s\nWHERE %s' % (sql, where)
         if self.group:
-            sql = '%s\nGROUP BY %s' % (sql, ','.join(self.group))
+            sql = '%s\nGROUP BY %s' % (sql, ','.join(list(self.group)))
         if self.order:
-            sql = '%s\nORDER BY %s' % (sql, ','.join(self.order))
+            sql = '%s\nORDER BY %s' % (sql, ','.join(list(self.order)))
         if self.limit is not None:
             sql = '%s\nLIMIT %s' % (sql, self.limit)
         return sql
         
 
     def sqlize(self, val):
+        if val is None:
+            return val
         if isinstance(val, basestring):
             return quote_sql_str(val)
         if isinstance(val, datetime):
@@ -145,10 +148,17 @@ class Query(object):
         select = Select(sels)
         where = list(self.where)
         if keys:
-            if not isinstance(keys, list):
-                keys = [keys]
+            keys = list(keys)
             keys = map(self.sqlize, list(keys))
-            where.append( '%s in (%s)' % (self.select.nonaggs[0].expr, ','.join(keys) ) )
+            expr = self.select.nonaggs[0].expr
+
+            clause = []
+            if None in keys:
+              clause.append("%s is null" % expr)
+            if len([k for k in keys if k is not None]) > 0:
+              clause.append("%s in %%s" % expr)
+            clause = " or ".join(clause)
+            where.append(clause)
         else:
             where.append( '%s = %%s' % (self.select.nonaggs[0].expr ) )
         _logger.debug( 'WHERE\t%s', where)

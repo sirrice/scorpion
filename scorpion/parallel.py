@@ -74,6 +74,9 @@ def serial_hybrid(obj, aggerr, **kwargs):
     db = connect(obj.dbname)
     obj.db = db
     obj.update_status('loading inputs into memory')
+
+
+    # get the input records!
     start = time.time()
     all_keys = list(chain(aggerr.keys, obj.goodkeys[aggerr.agg.shortname]))
     all_tables = get_provenance_split(obj, aggerr.agg.cols, all_keys)
