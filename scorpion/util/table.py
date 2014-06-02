@@ -42,6 +42,8 @@ def valid_table_cols(table, cols, kwargs={}):
     'total_charges', 'total_cost',  "totalcosts_ia", "totalcharges_ia",
     "estimatednetrevenue_ia", "estimated_net_revenue", "lengthofstay"
   ]
+  ignore_attrs = kwargs.get('ignore_attrs', [])
+  print "ignoring attrs: %s" % str(ignore_attrs)
   attrs = table.domain
   ret = []
   for attr in attrs:
@@ -49,7 +51,7 @@ def valid_table_cols(table, cols, kwargs={}):
       continue
     if attr.name in cols:
       continue
-    if attr.name in kwargs.get('ignore_attrs',[]):
+    if attr.name in ignore_attrs:
       continue
     if attr.name.endswith('id') and attr.name != 'moteid':
       continue
