@@ -68,6 +68,15 @@ class BDTTablesPartitioner(Basic):
         if self.inf_bounds is None:
           self.inf_bounds = [[inf, -inf] for table in tables]
 
+        # attributes to partition upon
+        self.cont_attrs = [attr.name for attr in merged.domain if attr.name in self.cols and attr.var_type != Orange.feature.Type.Discrete]
+        self.dist_attrs = [attr.name for attr in merged.domain if attr.name in self.cols and attr.var_type == Orange.feature.Type.Discrete]
+
+        # remove undesirable columns 
+        self.cont_attrs = filter(lambda c: c in self.cols, self.cont_attrs)
+        self.dist_attrs = filter(lambda c: c in self.cols, self.dist_attrs)
+
+
 
     def __call__(self, tables, full_table, root=None, **kwargs):
       self.setup_tables(tables, full_table)
@@ -411,18 +420,15 @@ class BDTTablesPartitioner(Basic):
 
 
     @instrument
-    def child_rules(self, rule, attrs=None):
-        attrs = attrs or self.cols
+    def child_rules(self, rule):
         next_rules = defaultdict(list)
-        cont_attrs = [attr.name for attr in self.merged_table.domain if attr.name in attrs and attr.var_type != Orange.feature.Type.Discrete]
-        dist_attrs = [attr.name for attr in self.merged_table.domain if attr.name in attrs and attr.var_type == Orange.feature.Type.Discrete]
 
-        if cont_attrs:
-            refiner = BeamRefiner(attrs=cont_attrs, fanout=2)
+        if self.cont_attrs:
+            refiner = BeamRefiner(attrs=self.cont_attrs, fanout=2)
             for attr, new_rule in refiner(rule):
                 next_rules[attr].append(new_rule)
-        if dist_attrs:
-            refiner = BeamRefiner(attrs=dist_attrs, fanout=5)
+        if self.dist_attrs:
+            refiner = BeamRefiner(attrs=self.dist_attrs, fanout=5)
             for attr, new_rule in refiner(rule):
                 next_rules[attr].append(new_rule)
         return next_rules.items()

@@ -18,6 +18,7 @@ from aggerror import *
 from arch import *
 from util import *
 from sigmod import *
+from settings import ID_VAR
 
 
 
@@ -74,8 +75,12 @@ def serial_hybrid(obj, aggerr, **kwargs):
         full_start = time.time()
         start = time.time()
 
+        # "id" column is special so we need to deal with it
+        # specially
         cols = valid_table_cols(bad_tables[0], aggerr.agg.cols, kwargs)
         all_cols = cols + aggerr.agg.cols        
+        if 'id' not in all_cols:
+          all_cols.append('id')
         torm = [attr.name for attr in bad_tables[0].domain if attr.name not in all_cols]
         _logger.debug("valid cols: %s" % cols)
 
@@ -124,26 +129,18 @@ def serial_hybrid(obj, aggerr, **kwargs):
             })
           params['c'] = params.get('c', .3)
 
-        #klass = SVM
-        #params.update({})
-        _logger.debug("c is set to: %.4f", params['c'])
+        if False:
+          klass = SVM
 
         start = time.time()
         hybrid = klass(**params)
         clusters = hybrid(all_full_table, bad_tables, good_tables)
-
-        obj.update_status('clustering results')
-        rules = clusters_to_rules(clusters, full_table)
-        print "nclusters: %d" % len(clusters)
         costs['rules_get'] = time.time() - start
 
-        _logger.debug("clustering %d rules" % len(rules))
-        for r in rules[:10]:
-          _logger.debug("%.4f\t%.4f - %.4f\t%s" % (r.quality, r.c_range[0], r.c_range[1], str(r)))
+        obj.update_status('clustering results')
+        print "nclusters: %d" % len(clusters)
 
-
-        clustered_rules = hybrid.group_rules(rules, 5)
-        rules = clustered_rules
+        rules = group_clusters(clusters, hybrid)
         costs['rules_cluster'] = time.time() - start
 
         ncalls = 0
@@ -172,4 +169,86 @@ def serial_hybrid(obj, aggerr, **kwargs):
 
 
 
-   
+def group_clusters(clusters, learner):
+  # find hierarchy relationships
+  # find equivalent rules via records matched
+  # find equivalent rules via inf_state
+  child2parent = get_hierarchies(clusters)
+
+  non_children = []
+  for c in clusters:
+    if c in child2parent:
+      pass
+    non_children.append(c)
+
+  non_children = filter_useless_clusters(non_children, learner)
+
+  groups = []
+  for key, group in group_by_inf_state(non_children).iteritems():
+    subgroups = group_by_tuple_ids(group)
+    subgroup = filter(bool, map(merge_clauses, subgroups.values()))
+    groups.append(subgroup)
+
+  return filter(bool, map(group_to_rule, groups))
+
+def get_hierarchies(clusters):
+  child2parent = {}
+  for idx, c1 in enumerate(clusters):
+    for c2 in clusters[idx+1:]:
+      if c1.contains(c2):
+        child2parent[c2] = c1
+      elif c2.contains(c1):
+        child2parent[c1] = c2
+  return child2parent
+
+def filter_useless_clusters(clusters, learner):
+  THRESHOLD = 0.01
+  mean_val = np.mean([ef.value for ef in learner.bad_err_funcs])
+  threshold = THRESHOLD * mean_val
+
+  f = lambda c: c.inf_state[0] and max(c.inf_state[0]) > threshold
+  return filter(f, clusters)
+
+def merge_clauses(clusters):
+  if len(clusters) == 0: return None
+  if len(clusters) == 1: return clusters[0]
+  conds = {}
+  for c in clusters:
+    for cond in c.rule.filter.conditions:
+      key = c.rule.condToString(cond)
+      conds[key] = cond
+  conds = conds.values()
+  rule = SDRule(clusters[0].rule.data, None, conds, None)
+  return Cluster.from_rule(rule, clusters[0].cols)
+
+
+def group_to_rule(clusters):
+  if len(clusters) == 0: return None
+  rule = max(clusters, key=lambda c: r_vol(c.c_range)).rule
+  for c in clusters[1:]:
+    rule.cluster_rules = []
+    rule.cluster_rules.append(c.rule)
+  return rule
+
+
+def group_by_inf_state(clusters):
+  """
+  super stupid check to group rules that have 
+  identical influence states
+  """
+  f = lambda cluster: tuple(map(tuple, cluster.inf_state))
+  return group_by_features(clusters, f)
+
+def group_by_tuple_ids(clusters):
+  def f(cluster):
+    ids = [int(row['id'].value) for row in cluster.rule.examples]
+    ids.sort()
+    return hash(tuple(ids))
+  return group_by_features(clusters, f)
+
+def group_by_features(clusters, f):
+  groups = defaultdict(list)
+  for c in clusters:
+    groups[f(c)].append(c)
+
+  return groups

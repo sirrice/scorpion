@@ -86,9 +86,8 @@ def get_provenance_split(sharedobj, cols, keys):
     # apply as a mask
     cols = map(np.array, zip(*rows))
 
-    # NOTE: don't have nulls anymore
-    #badmask = bad_row_mask(schema, cols[:-1])
-    #cols = [col[badmask] for col in cols]
+    # NOTE: we assume there are _no null values_
+    #       enforce this by running misc/fixnulls.py
     keycol = np.array(cols.pop())
     schema.pop()
 
@@ -99,9 +98,9 @@ def get_provenance_split(sharedobj, cols, keys):
 
     start = time.time()
     table = construct_orange_table(domain, schema, funcs, cols)
+    domain = table.domain
+
     # removed nulls from domain NOTE: no more nulls
-    #clean_domain = domain_rm_nones(domain)
-    clean_domain = domain
     print "create complete table %.4f" % (time.time() - start)
 
     start = time.time()
@@ -113,15 +112,9 @@ def get_provenance_split(sharedobj, cols, keys):
     start = time.time()
     for idx, key in enumerate(keys):
       # mask out rows that are not in this partition or have Nulls
-      partition_data = data[(keycol == key),:]
-      partition = Orange.data.Table(clean_domain, partition_data)
-
-      #badrows = [row for row in partition if '#RNGE' in map(str, row)]
-      #if badrows:
-      #  import pdb
-      #  pdb.set_trace()
-
-
+      idxs = (keycol == key)
+      partition_data = data[idxs,:]
+      partition = Orange.data.Table(domain, partition_data)
       tables.append(partition)
 
     print "create orange time %.4f " % (time.time() - start)

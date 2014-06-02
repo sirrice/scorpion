@@ -71,16 +71,16 @@ class BDT(Basic):
         Basic.setup_tables(self, full_table, bad_tables, good_tables, **kwargs)
 
 
+        # this is to cache a row's influence 
         self.SCORE_ID = add_meta_column(
-                chain([full_table], bad_tables, good_tables),
-                SCORE_VAR
+          chain([full_table], bad_tables, good_tables),
+          SCORE_VAR
         )
 
         domain = self.full_table.domain
         attrnames = [attr.name for attr in domain]
         self.cont_dists = dict(zip(attrnames, Orange.statistics.basic.Domain(self.full_table)))
         self.disc_dists = dict(zip(attrnames, Orange.statistics.distribution.Domain(self.full_table)))
-
 
         self.bad_states = [ef.state(t) for ef, t in zip(self.bad_err_funcs, self.bad_tables)]
         self.good_states = [ef.state(t) for ef, t in zip(self.good_err_funcs, self.good_tables)]

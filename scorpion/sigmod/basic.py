@@ -300,7 +300,6 @@ class Basic(object):
     state2rules = defaultdict(list)
     for r in rules:
       try:
-        print r
         key = tuple(map(tuple, r.inf_state))
         state2rules[key].append(r)
       except:
@@ -317,28 +316,35 @@ class Basic(object):
 
 
   def group_rules(self, rules, nclusters=7):
-      """
-      Cluster rules by influence on good and bad results
-      """
-      if not rules: return rules
-      if rules[0].c_range is not None:
-        rules.sort(key=lambda r: r_vol(r.c_range), reverse=True)
-        groups = []
-        group = []
-        for rule in rules:
-          if not group:
-            group.append(rule)
-          elif r_equal(group[0].c_range, rule.c_range):
-            group.append(rule)
-          else:
-            groups.extend(self.group_by_inf_state(group))
-            group = [rule]
-        if group:
+    """
+    Cluster rules by influence on good and bad results
+    """
+    
+    # find hierarchy relationships
+    # find equivalent rules via records matched
+    # find equivalent rules via inf_state
+
+
+
+    if not rules: return rules
+    if rules[0].c_range is not None:
+      rules.sort(key=lambda r: r_vol(r.c_range), reverse=True)
+      groups = []
+      group = []
+      for rule in rules:
+        if not group:
+          group.append(rule)
+        elif r_equal(group[0].c_range, rule.c_range):
+          group.append(rule)
+        else:
           groups.extend(self.group_by_inf_state(group))
-        return self.kmeans(groups, nclusters)
-      else:
-        rules.sort(key=lambda r: r.quality, reverse=True)
-        return self.kmeans(rules, nclusters)
+          group = [rule]
+      if group:
+        groups.extend(self.group_by_inf_state(group))
+      return self.kmeans(groups, nclusters)
+    else:
+      rules.sort(key=lambda r: r.quality, reverse=True)
+      return self.kmeans(rules, nclusters)
 
   def kmeans(self, rules, nclusters=7):
     if not rules: return rules
