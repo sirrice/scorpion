@@ -4,20 +4,19 @@ import time
 import sys
 import matplotlib
 import numpy as np
-sys.path.extend( ['.', '..', '../..'])
+import matplotlib.pyplot as plt
 
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import Rectangle as Rect
 from matplotlib import cm 
-import matplotlib.pyplot as plt
 from collections import defaultdict
 
-from db import *
-from aggerror import *
-from arch import *
-from gentestdata import *
-from util import reconcile_tables
-from sigmod import *
+from scorpion.db import *
+from scorpion.aggerror import *
+from scorpion.arch import *
+from scorpion.tests.gentestdata import *
+from scorpion.util import reconcile_tables
+from scorpion.sigmod import *
 
 matplotlib.use("Agg")
 
@@ -112,6 +111,9 @@ def get_parameters(datasetidx, **kwargs):
  
 
 def get_rules(full_table, bad_tables, good_tables, **kwargs):
+    """
+    Runs Scorpion on this dataset
+    """
     klass = kwargs['klass']
 
     learner = klass(**kwargs)
@@ -146,11 +148,12 @@ def run_experiment(datasetidx, **kwargs):
     ft,bts,gts, truth, aggerr, cols = get_parameters(datasetidx, **kwargs)
 
     params = {
-            'epsilon':0.001,
-            'tau':[0.01, 0.25],
-            'lamb':0.5,
-            'min_pts':3,
-            'c' : 0.  }
+        'epsilon':0.001,
+        'tau':[0.01, 0.25],
+        'lamb':0.5,
+        'min_pts':3,
+        'c' : 0.  
+    }
     params.update(kwargs)
     params.update({
         'aggerr' : aggerr,

@@ -75,37 +75,6 @@ class SVM(Basic):
           self.bad_table.extend(bt)
 
 
-    def nodes_to_clusters(self, nodes, table):
-        clusters = []
-        for node in nodes:
-            node.rule.quality = node.influence
-            fill_in_rules((node.rule,), table, cols=self.cols)
-            cluster = Cluster.from_rule(node.rule, self.cols)
-            cluster.states = node.states
-            cluster.cards = node.cards
-            clusters.append(cluster)
-        return clusters
-
-    def estimate_influence(self, cluster):
-        bad_infs, good_infs = [], []
-
-        for ef, big_state, state, n in zip(self.bad_states, cluster.bad_states, cluster.bad_cards):
-            if not state:
-                continue
-            influence = ef.recover(ef.remove(big_state, state, n))
-            bad_infs.append(influence)
-        if not bad_infs:
-            return -1e100000000
-        
-        if cluster.good_states:
-            for ef, big_state, state, n in zip(self.good_states, cluster.good_states, cluster.good_cards):
-                influence = ef.recover(ef.remove(big_state, state))
-                good_infs.append(inluencef)
-        
-
-        return self.l * np.mean(bad_infs) - (1. - self.l) * max(map(abs, good_infs))
-        
-
 
     def learn(self, data, nu=0.01, kernel=svm.kernels.RBF, svmtype=svm.SVMLearner.OneClass):
         learner = svm.SVMLearner(svm_type=svmtype, kernel_type=kernel, nu=nu)

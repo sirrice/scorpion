@@ -24,7 +24,6 @@ def rand_box(ndim, kdim, vol, bounds=None):
     availvol = max(0, vol * totalvol / usedvol)
     edge = availvol ** (1. / kdim)
 
-
     ret = []
     for attr, bound in zip(xrange(ndim), bounds):
         if attr < kdim:

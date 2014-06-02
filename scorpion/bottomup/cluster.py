@@ -14,7 +14,7 @@ from operator import sub
 from ..util.prob import *
 from ..util.misc import valid_number
 from ..learners.cn2sd.rule import SDRule
-from ..errfunc import compute_bad_inf, compute_bad_score
+from ..errfunc import compute_bad_inf, compute_bad_score, compute_influence
 
 from bounding_box import *
 
@@ -32,10 +32,9 @@ class Cluster(object):
         self.error = error
         self.bbox = bbox and (tuple(bbox[0]), tuple(bbox[1])) or ((),())
         self.discretes = defaultdict(set)
-        self.centroid = tuple([np.mean((p1, p2)) for p1, p2 in zip(*self.bbox)])
         self.cols = cols
+        self.centroid = tuple([np.mean((p1, p2)) for p1, p2 in zip(*self.bbox)])
         self.parents = parents or []
-        self.max_anc_error = self.max_ancestor_error()
         self.npts = kwargs.get('npts', 1)
         self.kwargs = kwargs
         self.id = Cluster._id
@@ -46,19 +45,11 @@ class Cluster(object):
         self.mean_inf = None
         self.idxs = []
 
-        # influence components (delta and counts)
         self.inf_state = None
-        self.bds = None
-        self.bcs = None
-        self.gds = None
-        self.gcs = None
-        self.mean_bd = None  # this is a dirty hack not
-        self.mean_bc = None  # provably correct
-        self.mean_gd = None
-        self.mean_gc = None
 
         # data structures for merger
         # for dominance in merger
+
         self.inf_range = None
 
         # lambda c: -> influence value
@@ -87,26 +78,6 @@ class Cluster(object):
 
         self.hash = None
         self._bound_hash = None
-
-    def create_inf_func(self, l):
-      if self.inf_state is None:
-        raise Exception("inf_state is None, cant' create inf_func")
-
-      inf_state = self.inf_state
-      vs = [gv for gv, gc in zip(inf_state[2], inf_state[3]) if gc]
-      if vs:
-        maxg = max(vs)
-      else:
-        maxg = 0
-      bds, bcs = [], []
-      for idx in xrange(len(inf_state[0])):
-        bd, bc = inf_state[0][idx], inf_state[1][idx]
-        if valid_number(bd) and valid_number(bc):
-          bds.append(bd)
-          bcs.append(bc)
-      f = lambda c: l*compute_bad_score(bds, bcs, c) - (1.-l)*maxg
-      return f
-
 
     @staticmethod
     def from_dict(thedict):
@@ -152,10 +123,6 @@ class Cluster(object):
           c.rule = self.rule
         return c
 
-    def max_ancestor_error(self):
-        if not self.parents:
-            return self.error
-        return max(self.error, max(p.max_anc_error for p in self.parents))
 
     def split_on(self, c):
         ex_clusters = [] # clusters that don't intersect with c
@@ -496,7 +463,7 @@ class Cluster(object):
             discretes.append(dkey)
             discretes.append(":::")
             discretes.extend(map(hash, sorted(self.discretes[dkey]))) 
-          self.hash = hash((state, self.bbox, str(discretes)))
+          self.hash = hash((self.bbox, str(discretes)))
         return self.hash
 
     @property

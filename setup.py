@@ -18,8 +18,9 @@ setup(name="scorpion",
       packages = find_packages(),
       package_dir = {'scorpion' : 'scorpion'},
       scripts = [
-        'tests/adjgraph.py',
-        'tests/sharedobj.py'
+        'tests/unit/adjgraph.py',
+        'tests/unit/sharedobj.py',
+        'tests/unit/render.py'
       ],
       package_data = {
         'scorpion': [

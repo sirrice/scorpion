@@ -55,8 +55,8 @@ class NDT(Basic):
                 vals=['0', '1'])
 
         start = time.time()
-        self.compute_influences(self.bad_tables, self.bad_err_funcs)
-        self.compute_influences(self.good_tables, self.good_err_funcs)
+        self.compute_perrow_influences(self.bad_tables, self.bad_err_funcs)
+        self.compute_perrow_influences(self.good_tables, self.good_err_funcs)
         self.cost_compute_inf = time.time() - start
 
 
@@ -255,7 +255,7 @@ class NDT(Basic):
 
       
  
-    def compute_influences(self, tables, err_funcs):
+    def compute_perrow_influences(self, tables, err_funcs):
         infs = []
         for table, err_func in zip(tables, err_funcs):
           for row in table:

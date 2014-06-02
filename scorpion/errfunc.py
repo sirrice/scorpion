@@ -1,4 +1,4 @@
-from functions import *
+from scorpion.functions import *
 
 
 def compute_bad_inf(bdelta, bcount, c):
@@ -6,26 +6,26 @@ def compute_bad_inf(bdelta, bcount, c):
     return 0
   return float(bdelta / pow(bcount, c))
 
-def compute_bad_score(bds, bcs, c):
+def compute_bad_score(bds, bcs, c, smooth=0.005):
   if not bds: return -float('inf')
 
-  # smoothing
-  smooth = .0001
-  bcs = [bc + smooth for bc in bcs]
-  total = float(sum(bcs))
-  if total == 0:
+  if len(filter(bool, bcs)) == 0:
     return -float('inf')
-
 
   topbots = zip(bds, bcs)
   binfs = [compute_bad_inf(top, bot, c) for top, bot in topbots]
 
+  bcs = [(bc > 0) and 1 or smooth for bc in bcs]
+  total = float(sum(bcs))
   weights = [bc/total for bc in bcs]
   try:
     return np.average(binfs, weights=weights)
   except:
     import pdb
     pdb.set_trace()
+
+def compute_influence(l, binf, ginf, nclauses=0, *args):
+  return l * binf - (1. - l) * ginf - 0.0001 * nclauses # XXX: add - len(rule.clauses)
 
 
 class ErrTypes(object):

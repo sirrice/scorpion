@@ -2,7 +2,7 @@
 # Validates that table doesn't contain any nulls
 # and optionally replaces null values with sane defaults
 #
-from sqlalchemy import *
+from sqlalchemy import create_engine
 from datetime import date
 
 

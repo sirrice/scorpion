@@ -14,7 +14,6 @@ from ..settings import *
 from ..util import *
 from ..split import *
 from ..aggerror import *
-from ..functions import StdFunc, AvgFunc
 from ..learners.cn2sd.refiner import *
 
 _logger = get_logger()

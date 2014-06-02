@@ -129,7 +129,7 @@ class Naive(Basic):
                 if max_card is not None and self.max_card_in_conds(clauses) < max_card:
                     continue
 
-                influences = self.influences(new_rule, cs=self.cs)
+                influences = [self.influence(new_rule, c) for c in self.cs]
                 for c, influence in zip(self.cs, influences):
                     clone = new_rule.clone()
                     clone.quality = influence

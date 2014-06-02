@@ -36,7 +36,6 @@ class SharedObj(object):
   def __init__(
       self, db, sql,
       errors=[],
-      bad_tuple_ids=None,
       goodkeys={},
       ignore_attrs=[],
       schema=[],
@@ -59,7 +58,6 @@ class SharedObj(object):
     self.goodkeys = goodkeys or {}
     self.schema = schema or SharedObj.get_schema(db, self.parsed.tables[0])
     # aggregate type -> {groupby key -> ids of "bad" tuples}
-    self._bad_tuple_ids = bad_tuple_ids or defaultdict(set)
     self.ignore_attrs = ignore_attrs
     self.merged_tables = {}
     self.rules = {}
@@ -83,18 +81,12 @@ class SharedObj(object):
     return [list(row) for row in self.get_filter_rows(keys=keys, attrs=attrs)]
     
 
-  def get_bad_tuple_ids(self, label=None):
-    if label:
-        return self._bad_tuple_ids.get(label, [])
-    return self._bad_tuple_ids
-
   def clone(self):
     return SharedObj(
       self.db, 
       self.sql,
       dbname=self.dbname,
       errors=self.errors,
-      bad_tuple_ids=self._bad_tuple_ids,
       goodkeys=self.goodkeys,
       ignore_attrs=self.ignore_attrs,
       schema=self.schema
@@ -165,7 +157,6 @@ class SharedObj(object):
 
   attrnames = property(lambda self: self.schema.keys())
   rules_schema = property(get_rules_schema)
-  bad_tuple_ids = property(get_bad_tuple_ids)
   sql = property(lambda self: str(self.parsed))
   prettify_sql = property(lambda self: self.parsed.prettify())
   filter = property(lambda self: self.parsed.get_filter_qobj())

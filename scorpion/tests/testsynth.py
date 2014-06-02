@@ -10,16 +10,15 @@ import sys
 import math
 import json
 import random
-sys.path.extend(['.', '..'])
-
 import numpy as np
 
-from sqlalchemy import *
+from sqlalchemy import create_engine
+from scorpion.util import get_logger
+from scorpion.misc.gensinglecluster import gen_points, in_box
+
+
 from common import *
 from setup_experiments import init_db
-from util import get_logger
-from misc.gensinglecluster import gen_points, in_box
-
 
 random.seed(0)
 

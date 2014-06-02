@@ -1,4 +1,4 @@
-from sqlalchemy import *
+from sqlalchemy import create_engine
 from common import *
 db = create_engine('postgresql://localhost/dbwipes')
 sigmoddb = create_engine('postgresql://localhost/sigmod')

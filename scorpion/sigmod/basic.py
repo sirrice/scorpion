@@ -16,7 +16,7 @@ from ..learners.cn2sd.refiner import *
 from ..bottomup.bounding_box import *
 from ..bottomup.cluster import *
 from ..util import *
-from ..errfunc import ErrTypes, compute_bad_inf, compute_bad_score
+from ..errfunc import ErrTypes, compute_bad_inf, compute_bad_score, compute_influence
 
 
 inf = float('inf')
@@ -51,6 +51,8 @@ class Basic(object):
     self.p = kwargs.get('p', 0.5)
     self.bincremental = kwargs.get('bincremental', True)
     self.use_cache = kwargs.get('use_cache', False)
+
+    self.DEBUG = kwargs.get('DEBUG', False)
 
     self.tablename = kwargs.get('tablename', None)
 
@@ -125,6 +127,56 @@ class Basic(object):
 
     pass
 
+  def rule_complexity(self, rule):
+    ret = 0
+    for cond in rule.filter.conditions:
+      pos = cond.position
+      attr = self.full_table.domain[pos]
+      if attr.var_type == Orange.feature.Type.Discrete:
+        fd = self.disc_dists[attr.name]
+        if len(cond.values) != len(fd.values()):
+          ret += 1
+          ret += max(0, 0.01 * len(cond.values) - 2)
+      else:
+        fb = self.cont_dists[attr.name]
+        if not r_contains([cond.min, cond.max], [fb.min, fb.max]):
+          ret += 1
+    return ret
+
+
+  def create_inf_func(self, cluster):
+    """
+    Args:
+      cluster-like object with attributes:
+        .inf_state
+        .rule
+
+    """
+    inf_state = cluster.inf_state
+    if inf_state is None:
+      raise Exception("inf_state is None, cant' create inf_func")
+
+    l = self.l
+    vs = [abs(gv) for gv, gc in zip(inf_state[2], inf_state[3]) if gc]
+    maxg = max(vs) if vs else 0
+
+    bds, bcs = [], []
+    for idx in xrange(len(inf_state[0])):
+      bd, bc = inf_state[0][idx], inf_state[1][idx]
+      if valid_number(bd) and valid_number(bc):
+        bds.append(bd)
+        bcs.append(bc)
+      else:
+        bds.append(0)
+        bcs.append(0)
+
+    rule = cluster.rule
+    complexity = self.rule_complexity(rule)
+    f = lambda c: compute_influence(l, compute_bad_score(bds, bcs, c), maxg, nclauses=complexity)
+    return f
+
+
+
   @instrument
   def cluster_to_rule(self, cluster, table=None):
     if not table:
@@ -137,62 +189,34 @@ class Basic(object):
 
   @instrument
   def influence_state(self, rule):
-    bdeltas, bcounts = Basic.bad_influences(self, rule)
-    gdeltas, gcounts = Basic.good_influences(self, rule)
+    bdeltas, bcounts = self.compute_stat(rule, self.bad_err_funcs, self.bad_tables)
+    gdeltas, gcounts = self.compute_stat(rule, self.good_err_funcs, self.good_tables)
     gdeltas = map(abs, gdeltas)
     return bdeltas, bcounts, gdeltas, gcounts
 
-  def influence_from_state(self, bdeltas, bcounts, gdeltas, gcounts, c=None):
+  def influence_from_state(self, bdeltas, bcounts, gdeltas, gcounts, c=None, nclauses=0):
     if c is None:
         c = self.c
     binf = compute_bad_score(bdeltas, bcounts, c)
     ginfs = [gdelta for gdelta,gcount in zip(gdeltas, gcounts) if gcount]
     ginf = ginfs and max(ginfs) or 0
-    ret = self.l * binf - (1. - self.l) * ginf
+    return compute_influence(self.l, binf, ginf, nclauses=nclauses)
 
-    return ret
-
-
-  @instrument
-  def influences(self, rule, cs=[]):
-    """
-    compute influences for a list of c values
-    """
-    bdeltas, bcounts, gdeltas, gcounts = self.influence_state(rule)
-    ginfs = [gdelta for gdelta,gcount in zip(gdeltas, gcounts) if gcount]
-    
-    ret = []
-    for c in cs:
-      binf = compute_bad_score(bdeltas, bcounts, c)
-      ginf = ginfs and max(ginfs) or 0
-      res = self.l * binf - (1. - self.l) * ginf
-
-      ret.append(res)
-    return ret
 
   @instrument
   def influence_cluster(self, cluster, table=None):
     rule = self.cluster_to_rule(cluster, table)
-    inf_state = self.influence_state(rule)
-    influence = self.influence_from_state(*inf_state)
-    cluster.error = influence
-    cluster.inf_state = inf_state
+    cluster.error = self.influence(rule)
+    cluster.inf_state = rule.inf_state
     return cluster.error
 
 
   def influence(self, rule, c=None):
     inf_state = self.influence_state(rule)
-    quality = self.influence_from_state(*inf_state)
+    quality = self.influence_from_state(*inf_state, nclauses=len(rule.filter.conditions))
     rule.quality = quality
     rule.inf_state = inf_state
     return quality
-
-
-  def bad_influences(self, rule):
-    return self.compute_stat(rule, self.bad_err_funcs, self.bad_tables)
-
-  def good_influences(self, rule):
-    return self.compute_stat(rule, self.good_err_funcs, self.good_tables)
 
 
   def compute_stat(self, rule, err_funcs, tables):
@@ -243,6 +267,7 @@ class Basic(object):
     for labelval in set(labels):
       idxs = labels == labelval
       labelrules = rules[idxs]
+      if not labelrules: continue
       strs = set()
       clauses = []
       for rule in labelrules:
@@ -262,6 +287,10 @@ class Basic(object):
 
 
     return ret
+
+
+  def feature_inf_state(self, rule):
+    return tuple(map(tuple, r.inf_state))
   
   def group_by_inf_state(self, rules):
     """
@@ -293,13 +322,13 @@ class Basic(object):
       """
       if not rules: return rules
       if rules[0].c_range is not None:
-        rules.sort(key=lambda r: r.c_range[1]-r.c_range[0], reverse=True)
+        rules.sort(key=lambda r: r_vol(r.c_range), reverse=True)
         groups = []
         group = []
         for rule in rules:
           if not group:
             group.append(rule)
-          elif group[0].c_range[0] == rule.c_range[0] and group[0].c_range[1] == rule.c_range[1]:
+          elif r_equal(group[0].c_range, rule.c_range):
             group.append(rule)
           else:
             groups.extend(self.group_by_inf_state(group))

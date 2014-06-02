@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import *
+from sqlalchemy import create_engine
 from common import *
 
 def print_clusters(sub, dim, clusters=[], tuples=[], title=''):

@@ -23,7 +23,7 @@ from ..settings import *
 from basic import Basic
 from sampler import Sampler
 from merger import Merger
-from rangemerger import RangeMerger
+from rangemerger import RangeMerger, RangeMerger2
 from crange import Frontier, r_vol, r_union
 from bdtpartitioner import *
 
@@ -132,26 +132,6 @@ class BDT(Basic):
       return clusters
 
 
-    def estimate_influence(self, cluster):
-        bad_infs, good_infs = [], []
-
-        for ef, big_state, state, n in zip(self.bad_states, cluster.bad_states, cluster.bad_cards):
-            if not state:
-                continue
-            influence = ef.recover(ef.remove(big_state, state, n))
-            bad_infs.append(influence)
-        if not bad_infs:
-            return -inf
-        
-        if cluster.good_states:
-            for ef, big_state, state, n in zip(self.good_states, cluster.good_states, cluster.good_cards):
-                influence = ef.recover(ef.remove(big_state, state))
-                good_infs.append(influence)
-        
-
-        return self.l * np.mean(bad_infs) - (1. - self.l) * max(map(abs, good_infs))
-
-
     @instrument
     def merge(self, clusters, nonleaves):
         if len(clusters) <= 1:
@@ -160,8 +140,7 @@ class BDT(Basic):
         self.update_status("starting merge phase")
         start = time.time()
         if [attr for attr in self.full_table.domain if attr.varType == orange.VarTypes.Discrete]:
-          use_mtuples = self.use_mtuples
-          #use_mtuples = False
+          use_mtuples = False
         else:
           use_mtuples = self.use_mtuples
         params = dict(self.params)
@@ -170,10 +149,9 @@ class BDT(Basic):
           'learner' : self,
           'cols' : self.cols,
           'c_range': self.c_range,
-          'use_mtuples' : use_mtuples,
-          'influence' : lambda c: self.influence_cluster(c)
+          'use_mtuples' : use_mtuples
         })
-        self.merger = RangeMerger(**params)
+        self.merger = RangeMerger2(**params)
         #self.merger = Merger(**params)
 
 
@@ -187,18 +165,19 @@ class BDT(Basic):
         #
         # Figure out what nonleafs to merge
         #
-        self.update_status("compting frontier")
+        self.update_status("computing frontier")
         _logger.debug("compute initial frontier")
         self.merger.setup_stats(clusters)
-        frontier, _ = self.merger.get_frontier(clusters)
-        frontier = list(frontier)
+        frontier,_ = Frontier(self.c_range, 0.01)(clusters)
+        #thresh = compute_clusters_threshold(clusters)
+        #frontier = [c for c in clusters if c.error >= thresh]
         to_add = []
         _logger.debug("get nonleaves containing frontier")
         for nonleaf in nonleaves:
           for c in frontier:
             if nonleaf.contains(c):
               nonleaf.error = self.influence_cluster(nonleaf)
-              frontier.append(nonleaf)
+              to_add.append(nonleaf)
               break
 
         self.update_status("expanding frontier")
@@ -374,10 +353,9 @@ class BDT(Basic):
         _logger.debug( '\n'.join(map(str, sorted(leaves, key=lambda n: n.influence)[:10])))
 
 
-        self.update_status("reconciling partitions")
+        self.update_status("reconciling %d partitions" % (len(nonleaves) + len(leaves)))
         start = time.time()
-        popular_clusters = self.nodes_to_popular_clusters(nonleaves, full_table)
-        nonleaf_clusters = self.nodes_to_clusters(nonleaves, full_table)
+        #popular_clusters = self.nodes_to_popular_clusters(nonleaves, full_table)
         self.stats['intersect_partitions'] = [time.time()-start, 1]
         self.cost_split = time.time() - start
 
@@ -385,7 +363,8 @@ class BDT(Basic):
         #       no need to intersect their results
         #clusters = self.intersect(bclusters, hclusters)
         clusters = self.nodes_to_clusters(tree.leaves, full_table)
-        clusters.extend(popular_clusters)
+        nonleaf_clusters = self.nodes_to_clusters(nonleaves, full_table)
+        #clusters.extend(popular_clusters)
 
         if False:
           start = time.time()
@@ -393,6 +372,17 @@ class BDT(Basic):
             if not c.inf_state:
               c.error = self.influence_cluster(c)
           self.stats['init_cluster_errors'] = [time.time()-start, 1]
+
+        if self.DEBUG:
+          renderer = ClusterRenderer('/tmp/bdt.pdf')
+          renderer.plot_clusters(clusters)
+          renderer.new_page()
+          renderer.plot_clusters(nonleaf_clusters)
+
+          tuples = [map(float,[row['a_0'], row['a_1'], row['v']]) for row in self.bad_tables[0]]
+          renderer.plot_tuples(tuples)
+          renderer.close()
+
 
 
         self.cache_results(clusters, nonleaf_clusters)
@@ -443,9 +433,9 @@ class BDT(Basic):
       import bsddb as bsddb3
       self.cache = bsddb3.hashopen('./dbwipes.cache')
       try:
-        self.update_status("loading partitions from cache")
         myhash = str(hash(self))
         if myhash in self.cache and self.use_cache:
+          self.update_status("loading partitions from cache")
           dicts, nonleaf_dicts, errors = json.loads(self.cache[myhash])
           clusters = map(Cluster.from_dict, dicts)
           nonleaf_clusters = map(Cluster.from_dict, nonleaf_dicts)

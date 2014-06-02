@@ -5,6 +5,7 @@ import orange
 import cStringIO
 
 from collections import defaultdict
+from scorpion.util.rangeutil import *
 
 
 inf = infinity = 1e10000
@@ -182,8 +183,8 @@ class SDRule(object) :
                 cond = orange.ValueFilter_continuous(
                     position=pos,
                     oper = orange.ValueFilter.Between,
-                    min = minv,
-                    max = maxv
+                    min = minv-1,
+                    max = maxv+1
                     )
             self.filter.conditions.append(cond)
 
@@ -411,7 +412,7 @@ class SDRule(object) :
               values = [orange.Value(attr, val) for val in vals]
             )
           else:
-            if old_cond.min <= fb.min and old_cond.max >= fb.max:
+            if r_contains([old_cond.min, old_cond.max], [fb.min, fb.max]):
               continue
             cond = old_cond
           conds.append(cond)
@@ -499,7 +500,12 @@ class SDRule(object) :
         if len(c.values) == 0 or len(c.values) == len(domain[c.position].values):
           return None
 
+        def reencode(v):
+          if v == 'None' or v == 'NULL':
+            return None
+          return v
         vals = [domain[c.position].values[int(vidx)] for vidx in c.values]
+        vals = map(reencode, vals)
         ret['type'] = 'str'
         ret['vals'] = vals
       else:
@@ -927,127 +933,6 @@ def get_ref_bounds(data):
     return ret
 
 
-def merge_rules(data, rules, threshold=0.001):
-    ref_bounds = get_ref_bounds(data)
-    kept_boxes = rules_to_bounds(rules, ref_bounds)
-    kept_boxes = set(kept_boxes)
-
-    while kept_boxes:
-        #print len(kept_boxes)
-        boxes = list(kept_boxes)
-        added = False
-        
-        for idx, b1 in enumerate(boxes):
-            for b2 in boxes[idx+1:]:
-                #if b1.too_different(b2):
-                #    continue
-
-                u = b1.union(b2)
-                i = b1.intersect(b2)
-                a = u.area
-                d = a - b1.area - b2.area + i.area
-                
-                #print '\t'.join(['%.7f']*6) % (d/a, a, d, b1.area, b2.area, i.area), b1, b2
-
-                if i.area > (b1.area + b2.area):
-                    import pdb
-                    pdb.set_trace()
-                    i.get_area()
-                if a < 1e-10:
-                    continue
-                if d / a > (threshold - 1e-10):
-                    continue
-
-                kept_boxes.difference_update([b1, b2])
-                added = added or u not in kept_boxes
-                kept_boxes.add(u)
-
-
-        if not added:
-            break
-
-    ret = []
-    for bound in kept_boxes:
-        ret.append(bound.to_rule(data))
-        
-    return ret
-
-
-
-def rule_overlaps(rule, rules, threshold):
-    """
-    Checks if rule overlaps with any of the rules
-    Overlap is defined by same set of discrete values and interval
-    overlap of >= 95%
-    """
-    domain = rule.data.domain
-    d = dict([(rule.data.domain[c.position].name, c)
-              for c in rule.filter.conditions])
-    
-    for r2 in rules:
-        boverlap = True
-        domain2 = r2.data.domain
-        for c2 in r2.filter.conditions:
-            attr2 = domain2[c2.position]
-            c = d.get(attr2.name, None)
-
-            if (not c or
-                domain[c.position].varType !=
-                domain2[c2.position].varType):
-                boverlap = False
-                break
-            
-            attr = domain[c.position]
-            
-            if attr.varType == orange.VarTypes.Discrete:
-                vals1 = [attr.values[int(vidx)] for vidx in c.values]
-                vals2 = [attr2.values[int(vidx)] for vidx in c2.values]
-                if set(vals1) != set(vals2):
-                    boverlap = False
-                    break
-            else:
-                if (math.isinf(c.min) != math.isinf(c2.min) or
-                    math.isinf(c.max) != math.isinf(c2.max)):
-                    boverlap = False
-                    break
-
-                if math.isinf(c.min) or math.isinf(c.max):
-                    boverlap = False
-                    break
-
-                inner = abs(max(c.min, c2.min) - min(c.max, c2.max))
-                outer = abs(max(c.max, c2.max) - min(c.min, c2.min))
-                if float(inner) / outer < threshold:
-                    boverlap = False
-                    break
-
-        if boverlap:
-            return True
-    return False
-            
-
-def remove_duplicate_rules(rules, threshold=0.95):
-    # cluster by attributes    
-    clusters = defaultdict(list)
-    for r in rules:
-        attrs = [r.data.domain[c.position].name
-                 for c in r.filter.conditions]
-        attrs.sort()
-        clusters[tuple(attrs)].append(r)
-
-    # merge rules that overlap significantly in their ranges
-    # discrete rules are merged if they contain exact same set of
-    # values
-    ret = []
-    for attrs, cluster in clusters.iteritems():
-        uniquerules = []
-        for rule in cluster:
-            if not rule_overlaps(rule, uniquerules, threshold):
-                uniquerules.append(rule)
-        ret.extend(uniquerules)
-
-    return filter(lambda r: r in ret, rules)
-
 def remove_subsumed_rules(rules):
     """
     goes through rules in order of quality and removes rules that are
@@ -1072,21 +957,29 @@ def remove_subsumed_rules(rules):
     return ret
 
 
-def fill_in_rules(rules, table, cols=None):
+def fill_in_rules(rules, table, cols=None, cont_dists=None):
     # compute bounds for columns in self.cols
     if cols is None:
         cols = [attr.name for attr in table.domain]
 
-    nparr = table.to_numpyMA('ac')[0]
+    nparr = None
     ref_bounds = {}
     for col in cols:
         attr = table.domain[col]
         if attr.var_type == Orange.feature.Type.Discrete:
             ref_bounds[col] = None
             continue
-        pos = table.domain.index(attr)
-        arr = nparr[:,pos]
-        ref_bounds[col] = (arr.min(), arr.max())
+
+        if cont_dists:
+          bound = cont_dists[attr.name].min, cont_dists[attr.name].max
+        else:
+          if nparr is None:
+            nparr = table.to_numpyMA('ac')[0]
+          pos = table.domain.index(attr)
+          arr = nparr[:,pos]
+          bound = (arr.min(), arr.max())
+
+        ref_bounds[col] = bound
 
 
     for rule in rules:

@@ -12,7 +12,7 @@ from matplotlib.patches import Rectangle as Rect
 from matplotlib import cm 
 import matplotlib.pyplot as plt
 from collections import defaultdict
-from sqlalchemy import *
+from sqlalchemy import create_engine
 
 from db import *
 from score import *

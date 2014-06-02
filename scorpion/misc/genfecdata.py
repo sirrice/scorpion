@@ -1,7 +1,7 @@
-from sqlalchemy import *
+from scorpion.db import connect
 import random
 
-db = create_engine('postgresql://localhost/fec12')
+db = engine('fec12')
 
 for i in xrange(500):
   amt = 100000 + random.randint(-5000, 5000)

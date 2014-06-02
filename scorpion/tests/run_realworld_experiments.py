@@ -2,7 +2,7 @@ from common import *
 from test import run
 
 if __name__ == '__main__':
-  from sqlalchemy import *
+  from sqlalchemy import create_engine
   db = create_engine('postgresql://localhost/sigmod')
   pp = PdfPages('figs/test.pdf')
 

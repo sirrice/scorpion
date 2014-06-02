@@ -2,11 +2,13 @@ import pdb
 import numpy as np
 import matplotlib.pyplot as plt
 from pylab import get_cmap
+
+
 from gensinglecluster import gen_points
-from sqlalchemy import *
+from scorpion.db import connect
 
 
-db = create_engine("postgresql://localhost/intel")
+db = connect("postgresql://localhost/intel")
 res = db.execute("select light, voltage, temp from readings where light > 0 and humidity > 0 and temp >= 0 and temp <= 300 and sensor >= 0 and sensor < 100 and voltage >= 0.1 and voltage < 10;")
 pts = [list(r) for r in res]
 pts = np.array(pts)

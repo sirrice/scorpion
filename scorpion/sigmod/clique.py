@@ -18,7 +18,7 @@ from ..util import *
 
 from crange import r_vol
 from basic import Basic
-from rangemerger import RangeMerger
+from rangemerger import RangeMerger, RangeMerger2
 from merger import Merger
 from grouper import Grouper, Blah
 
@@ -73,11 +73,9 @@ class MR(Basic):
 
 
 
-
     def set_params(self, **kwargs):
         self.cols = kwargs.get('cols', self.cols)
         self.params.update(kwargs)
-        self.max_bad_inf = -1e1000000
         self.good_thresh = 0.0001
         self.granularity = kwargs.get('granularity', self.granularity)
 
@@ -92,14 +90,13 @@ class MR(Basic):
       for attrs, groups in new_groups:
         start = time.time()
         for ro in self.grouper(attrs, groups):
-
           if self.max_wait:
             self.n_rules_checked -= len(ro.rule.filter.conditions)
             if self.n_rules_checked <= 0:
               diff = time.time() - self.start
               if not self.checkpoints or diff - self.checkpoints[-1][0] > 10:
                 if self.best:
-                  best_rule = max(self.best, key=lambda r: r.inf).rule
+                  best_rule = max(self.best).rule
                   self.checkpoints.append((diff, best_rule))
               self.stop = diff > self.max_wait
               self.n_rules_checked = 1000
@@ -125,10 +122,6 @@ class MR(Basic):
       self.all_clusters = self.final_clusters = clusters
       return clusters
 
-      self.best.sort(reverse=True)
-      return self.merge_rules(self.best)
-
-
 
     def find_cliques(self):
       """
@@ -149,7 +142,6 @@ class MR(Basic):
           niters += 1
           self.update_status("running bottomup iter %d" % niters)
           _logger.debug("=========iter %d=========", niters)
-          besthash = hash(tuple(self.best))
 
           nadded = 0
           nnewgroups = 0
@@ -171,15 +163,10 @@ class MR(Basic):
                   new_rules[attr].append(ro.group)
                   nnewgroups += 1
               ro.rule.__examples__ = None
-              if nnewgroups % 10000 == 0:
-                  pass
-                  #print "# new groups\t", nnewgroups, '\t', time.time()-self.start, self.max_wait
-
 
 
           if not nadded: 
-              pass
-#                break
+            break # pass
 
           rules = new_rules
           if niters == 1:
@@ -203,6 +190,15 @@ class MR(Basic):
       self.update_status("computing partition influences")
       clusters = map(self.blah_to_cluster, ret)
 
+
+      if self.DEBUG:
+        renderer = JitteredClusterRenderer('/tmp/clique.pdf')
+        for idx, bests in enumerate(self.opts_per_iter):
+          renderer.plot_clusters(map(self.blah_to_cluster, bests))
+          renderer.set_title("clique iter %d" % idx)
+          renderer.new_page()
+        renderer.close()
+
       self.cache_results(clusters)
       return clusters
 
@@ -218,23 +214,15 @@ class MR(Basic):
       start = time.time()
 
       clusters = filter_bad_clusters(clusters)
-      thresh = compute_clusters_threshold(clusters, nstds=0.)
-      is_mergable = lambda c: c.error >= thresh
-      is_mergable = lambda c: True
-      influence_f = lambda c: self.influence_cluster(c, self.full_table)
       params = dict(self.params)
       params.update({
         'learner_hash': hash(self),
-        'cols' : self.cols,
-        'influence' : influence_f,
-        'is_mergable' : is_mergable,
         'c_range': self.c_range,
         'use_mtuples' : False,
         'learner' : self,
         'partitions_complete' : False
       })
-      self.merger = RangeMerger(**params)
-      #self.merger = Merger(**params)
+      self.merger = RangeMerger2(**params)
       self.final_clusters = self.merger(clusters)
       self.all_clusters = clusters
       self.cost_merge = time.time() - start
@@ -247,19 +235,7 @@ class MR(Basic):
       return self.final_clusters
 
 
-    def prune_rules(self, rules):
-      ret = defaultdict(set)
-      for key, ros in rules.iteritems():
-          for ro in ros:
-              if self.prune_rule(ro):
-                  ret[key].add(ro)
-      return ret
-    
     def prune_rule(self, ro):
-      # update bad influence bounds
-      self.max_bad_inf = max(self.max_bad_inf, ro.bad_inf)
-      self.bad_thresh = max(self.bad_thresh, 0.01 * self.max_bad_inf)
-
       if ro.npts < self.min_pts:
           _logger.debug("prune? %s\t%s", 'FALSE', str(ro))
           return False
@@ -270,10 +246,6 @@ class MR(Basic):
           _logger.debug("prune? %s\t%s", 'FALSE', str(ro))
           return False
       
-      # check min bad influence
-      #if ro.bad_inf < self.bad_thresh:
-      #    return False
-
 
       # assuming the best case (the good_stat was zero)
       # would the influence beat the best so far across
@@ -290,7 +262,7 @@ class MR(Basic):
       #        return False
 
       # check max good influence
-      if ro.good_inf < self.good_thresh:
+      if False and ro.good_inf < self.good_thresh:
           # TODO: can skip computing good_stats
           ro.good_skip = True
 
@@ -313,13 +285,14 @@ class MR(Basic):
           if math.isnan(ro.inf):
               continue
 
-          if not best or ro.inf > best.inf:
+          
+          if len(self.best) < self.max_bests:
               n += 1            
               _logger.debug(str(ro))
-
-          if len(self.best) < self.max_bests:
               heapq.heappush(self.best, ro)
           else:
+              n += 1            
+              _logger.debug(str(ro))
               heapq.heapreplace(self.best, ro)
           
           best = best and max(best, ro) or ro

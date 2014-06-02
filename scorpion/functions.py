@@ -2,7 +2,7 @@ import numpy as np
 import Orange
 from itertools import repeat
 
-from util import *
+from scorpion.util import *
 
 _logger = get_logger()
 

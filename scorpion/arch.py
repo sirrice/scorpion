@@ -82,7 +82,6 @@ def get_provenance_split(sharedobj, cols, keys):
     print "dbquery cost %.4f" % (time.time() - start)
     if not len(rows): return None
 
-
     # create a column for the partitioning key so we can efficiently
     # apply as a mask
     cols = map(np.array, zip(*rows))

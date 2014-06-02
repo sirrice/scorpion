@@ -25,9 +25,10 @@ class FeatureMapper(object):
   For discrete features
   """
 
-  def __init__(self, domain):
+  def __init__(self, domain, cont_dists):
     self.feature_mappers = {}
-
+    self.cont_dists = cont_dists
+    self.ranges = { col: cont_dists[col].max - cont_dists[col].min for col in cont_dists.keys() if cont_dists[col] }
     for attr in domain:
       if 'Contin' not in str(attr):
         self.feature_mappers[attr.name] = self.get_feature_mapper(attr)
@@ -56,12 +57,12 @@ class FeatureMapper(object):
     return vect
 
 class AdjacencyGraph(object):
-  def __init__(self, clusters, domain):
+  def __init__(self, clusters, domain, cont_dists):
     """
     Args
       domain: orange table domain
     """
-    self.feature_mapper = FeatureMapper(domain)
+    self.feature_mapper = FeatureMapper(domain, cont_dists)
     self.versions = []
     self.insert_buf = clusters or []
 
@@ -155,22 +156,26 @@ class AdjacencyVersion(object):
     p.idx_extension = 'index'
 
     if clusters:
-        gen_func = ((i, self.bbox_rtree(c, enlarge=0.00001), None) for i, c in enumerate(clusters))
+        gen_func = ((i, self.bbox_rtree(c, enlarge=0.005), None) for i, c in enumerate(clusters))
         self._rtree = RTree(gen_func, properties=p)
     else:
         self._rtree = RTree(properties=p)
     return self._rtree
 
   def bbox_rtree(self, cluster, enlarge=0.):
+    cols = cluster.cols
     bbox = cluster.bbox
     lower, higher = map(list, bbox)
     if self._ndim == 1:
         lower.append(0)
         higher.append(1)
 
-    if enlarge != 1.:
-        lower = [v - enlarge for v in lower]
-        higher = [v + enlarge for v in higher]
+    if enlarge != 0:
+      for idx in xrange(len(lower)):
+        col = cols[idx]
+        rng = enlarge * self.feature_mapper.ranges[col]
+        lower[idx] -= rng
+        higher[idx] += rng
 
     bbox = lower + higher
     return bbox
@@ -187,7 +192,7 @@ class AdjacencyVersion(object):
 
   def search_rtree(self, cluster):
     self.setup_rtree(len(cluster.bbox[0]))
-    bbox = self.bbox_rtree(cluster, enlarge=0.00001)
+    bbox = self.bbox_rtree(cluster, enlarge=0.005)
     return self._rtree.intersection(bbox)
     res = [self.clusters[idx] for idx in self._rtree.intersection(bbox)]
     return filter(bool, res)

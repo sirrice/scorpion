@@ -70,23 +70,30 @@ def make_params(**kwargs):
   return ret
 
 def mkfmt(arr):
-    mapping = [(float, '%.4f'), (int, '%d'),  (object, '%s')]
-    fmt = []
-    for v in arr:
-        for t,f in mapping:
-            if isinstance(v,t):
-                fmt.append(f)
-                break
+  """
+  Given a list of object types, returns a tab separated formatting str
+  """
+  mapping = [(float, '%.4f'), (int, '%d'),  (object, '%s')]
+  fmt = []
+  for v in arr:
+      for t,f in mapping:
+          if isinstance(v,t):
+              fmt.append(f)
+              break
 
-    return '\t'.join(fmt)
+  return '\t'.join(fmt)
 
 
 def get_ground_truth(db, datasetidx, c):
-    with db.begin() as conn:
-        q = """select ids from stats where klass = 'Naive' and dataset = %s and c = %s order by expid desc"""
-        for row in conn.execute(q, datasetidx, c).fetchall():
-            return map(int, map(float, row[0].split(',')))
-        return None
+  """
+  The experiments are supposed to also log the ground truth.
+  Retriev them from the experiment stats table
+  """
+  with db.begin() as conn:
+    q = """select ids from stats where klass = 'Naive' and dataset = %s and c = %s order by expid desc"""
+    for row in conn.execute(q, datasetidx, c).fetchall():
+        return map(int, map(float, row[0].split(',')))
+    return None
 
 
 

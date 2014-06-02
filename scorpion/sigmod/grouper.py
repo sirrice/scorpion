@@ -24,47 +24,64 @@ _logger = get_logger()
 
 
 class Blah(object):
-  def __init__(self, attrs, group, bad_deltas, bad_counts, 
-      good_deltas, good_counts, maxinf, mr, grouper):
+  def __init__(
+      self, attrs, group, 
+      bds, bcs, gds, gcs, 
+      maxinf, mr, grouper):
 
     self.attrs = attrs
     self.grouper = grouper
     self.group = group
-    self.inf_state = (bad_deltas, bad_counts, good_deltas, good_counts)
+    self.inf_state = (bds, bcs, gds, gcs)
     self.mr = mr
     self.c_range = list(mr.c_range)
+    self._rule = None
 
     c = mr.c
     l = mr.l
 
-    good_infs = [abs(gd) for gd,gc in zip(good_deltas, good_counts) if gc]
-    self.good_inf = (1. - l) * (good_infs and max(good_infs) or 0)
+    good_infs = [abs(gd) for gd,gc in zip(gds, gcs) if gc]
+    self.maxg = max(good_infs) if good_infs else 0
+    self.good_inf = (1. - l) * self.maxg
+
+    self.bad_inf_func = self.create_bad_inf_func()
+    self.inf_func = self.create_inf_func()
+
+    self.best_tuple_inf = l * maxinf
+
+    self.bad_inf = self.bad_inf_func(c)
+    self.inf = self.inf_func(c)
+    self.maxinf = maxinf
+    self.npts = sum(bcs) + sum(gcs)
+
+
+    # @deprecated
+    self.best_inf = self.bad_inf
     self.good_skip = False # subpredicates can skip computing good_inf
 
-    self.bad_inf_func = self.create_bad_inf_func(l)
-    self.inf_func = self.create_inf_func(l, self.good_inf)
-    self.bad_inf = self.bad_inf_func(c)
+  def create_bad_inf_func(self):
+    """
+    copy and pasted from Basic.create_inf_func
+    """
+    bds, bcs = [], []
+    for idx in xrange(len(self.inf_state[0])):
+      bd, bc = self.inf_state[0][idx], self.inf_state[1][idx]
+      if valid_number(bd) and valid_number(bc):
+        bds.append(bd)
+        bcs.append(bc)
+      else:
+        bds.append(0)
+        bcs.append(0)
 
-    self.inf = self.bad_inf - self.good_inf
-    self.best_inf = self.bad_inf
-    self.best_tuple_inf = l * maxinf
-    self.maxinf = maxinf
-    self.npts = sum(bad_counts) + sum(good_counts)
-
-    self._rule = None
-
-  def create_bad_inf_func(self, l):
-    bds, bcs, gds, gcs = self.inf_state
-    bds = [bd for bd, bc in zip(bds, bcs) if bc]
-    bcs = filter(bool, bcs)
-    pairs = zip(bds, bcs)
-    f = lambda c: l*compute_bad_score(bds, bcs, c)
+    def f(c, l=None):
+      l = l if l is not None else self.mr.l
+      return compute_influence(l, compute_bad_score(bds, bcs, c), 0)
     return f
 
-  def create_inf_func(self, l, ginf):
-    badf = self.create_bad_inf_func(l)
-    g = lambda c: (1.-l)*ginf + l*badf(c)
-    return g
+  def create_inf_func(self):
+    l = self.mr.l
+    f = lambda c: compute_influence(l, self.bad_inf_func(c, 1.), self.maxg)
+    return f
 
   def dominated_by(self, o, c_range=None):
     if not c_range: c_range = self.c_range
@@ -127,7 +144,7 @@ class Blah(object):
     return 'inf %.4f\tpts %d/%d\tr/g %.4f - %.4f\t%s' % args
 
   def __hash__(self):
-      return hash(str(self.group))
+      return hash(str(self.group) + str(self.attrs))
 
   def __eq__(self, o):
       return hash(self) == hash(o)
@@ -188,13 +205,15 @@ class Grouper(object):
                     ranges = [(minv, maxv)]
                 else:
                     def make_func(minv, block):
-                        def f(v):
-                            return int(math.floor((v-minv)/block))
-                        return f
+                      def f(v):
+                        return int(math.ceil((v-minv)/block)) 
+                      return f
                     block = (maxv - minv) / float(self.mr.granularity)
+                    n = self.mr.granularity #+1
                     f = make_func(minv, block)
-                    ranges = [(minv + i*block, minv + (i+1)*block) for i in xrange(self.mr.granularity+1)]
-                    n = self.mr.granularity+1
+                    ranges = [(maxv - (i+1)*block, maxv - (i)*block) for i in xrange(n-1,-1,-1)]
+                    ranges[0] = [-float('infinity'), ranges[0][1]]
+                    ranges[-1] = [ranges[-1][0], float('infinity')]
                     print attr, block, minv, maxv
 
             gbfuncs[attr] = f
@@ -278,6 +297,7 @@ class Grouper(object):
 
 
       for g in valid_groups:
+        # compute the influence_state for each group (cube)
         bds, bcs, maxinf = self._get_infs(bad_table_rows, self.mr.bad_err_funcs, g, True)
         gds, gcs, _ = self._get_infs(good_table_rows, self.mr.good_err_funcs, g, False)
         if not bcs:

@@ -1,8 +1,8 @@
 import sys
 sys.path.extend(['.', '..'])
 
-from arch import *
-from aggerror import ErrTypes
+from scorpion.arch import *
+from scorpion.aggerror import ErrTypes
 
 
 class DatasetNames(object):

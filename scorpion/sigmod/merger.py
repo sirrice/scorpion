@@ -61,11 +61,12 @@ class Merger(object):
     def set_params(self, **kwargs):
         self.min_clusters = kwargs.get('min_clusters', self.min_clusters)
         # lambda cluster: influence_value_of(cluster)
-        self.influence = kwargs.get('influence', self.influence)
         self.learner = kwargs.get('learner', self.learner)
+        self.influence = self.learner.influence_cluster
         self.use_mtuples = kwargs.get('use_mtuples', self.use_mtuples)
         self.use_cache = kwargs.get('use_cache', self.use_cache)
         self.partitions_complete = kwargs.get('partitions_complete', self.partitions_complete)
+
         
 
     def setup_stats(self, clusters):
@@ -188,9 +189,17 @@ class Merger(object):
       bbox = [list(cluster.bbox[0]), list(cluster.bbox[1])]
       merged = cluster.clone()
       if dec is not None:
-        bbox[0][dim] = dec
+        if bbox[0][dim] <= dec:
+          dec = None
+        else:
+          bbox[0][dim] = dec
       if inc is not None:
-        bbox[1][dim] = inc
+        if bbox[1][dim] >= inc:
+          inc = None
+        else:
+          bbox[1][dim] = inc
+      if dec is None and inc is None:
+        return None
       merged.bbox = (tuple(bbox[0]), tuple(bbox[1]))
       if skip and hash(merged) in skip: 
         return None
@@ -216,24 +225,37 @@ class Merger(object):
       merged.parents = [cluster]
       return merged
 
-
-    def expand_candidates(self, cluster, seen=None):
+    def dims_to_expand(self, cluster, seen=None):
       """
+      Returns an iteratior of each dimension, direction, and values
+      to expand along that dimension
+
       Args
         seen    set of clusters that have been already generated and
                 can be skipped
       Yields (dim, dir, g)
-            dim: dimention
-            dir: direction of expansion ('inc', 'dec', 'disc')
-            g: generator of increasing clusters along dim in dir direction
+            dim:  dimention
+            dir:  direction of expansion ('inc', 'dec', 'disc')
+            vals: values along this dimension and direction
       """
-      neighbors = self.adj_graph.neighbors(cluster)
-      check = lambda n: not((seen and hash(n) in seen) or (n==cluster) or cluster.same(n, epsilon=0.01) or cluster.contains(n))
-      neighbors = filter(check, neighbors)
-      _logger.debug("\t#neighbors\t%d", len(neighbors))
-      if not neighbors: return
+      def check(n):
+        return not(
+          (seen and hash(n) in seen) or 
+          (n==cluster) or 
+          cluster.same(n, epsilon=0.01) or 
+          cluster.contains(n)
+        )
 
-      f = lambda tomerge: self.merge(cluster, tomerge, clusters)
+      start = time.time()
+      neighbors = self.adj_graph.neighbors(cluster)
+      cost = time.time() - start
+      self.stats['neighbor'][0] += cost
+      self.stats['neighbor'][1] += 1
+      _logger.debug("\t# neighbors: %d", len(neighbors))
+
+      neighbors = filter(check, neighbors)
+      if not neighbors: 
+        return
 
       # gather all the directions and increments to expand along
       start = time.time()
@@ -241,8 +263,8 @@ class Merger(object):
       dim_to_decs = defaultdict(set)
       dim_to_discs = defaultdict(set)
       for n in neighbors:
-        for dim in xrange(len(n.cols)):
-          minv, maxv = n.bbox[0][dim], n.bbox[1][dim]
+        for dim, bound in enumerate(zip(*n.bbox)):
+          minv, maxv = tuple(bound)
           if minv < cluster.bbox[0][dim]:
             dim_to_decs[dim].add(minv)
           if maxv > cluster.bbox[1][dim]:
@@ -257,34 +279,41 @@ class Merger(object):
       self.stats['gather'][1] += 1
 
 
-      if True or self.DEBUG:
-        for dim in xrange(len(cluster.cols)):
-          colname = cluster.cols[dim][:10]
-          _logger.debug("\t%s\t#neighs\tinc\t%d", colname, len(dim_to_incs[dim]))
-          _logger.debug("\t%s\t#neighs\tdec\t%d", colname, len(dim_to_decs[dim]))
+      for dim, vals in dim_to_decs.iteritems():
+        vals = filter(bool, sorted(vals, reverse=True))
+        yield (dim, 'dec', vals)
 
-        for dim, discs in dim_to_discs.iteritems():
-          dim = dim[:10]
-          _logger.debug("\t%s\t#neighs\t   \t%d", dim, len(discs))
+      for dim, vals in dim_to_incs.iteritems():
+        vals = filter(bool, sorted(vals))
+        yield (dim, 'inc', vals)
 
-      for dim in xrange(len(cluster.cols)):
-        generator = (self.dim_merge(cluster, dim, None, inc, seen) 
-            for inc in sorted(dim_to_incs[dim]))
+      for dim, vals in dim_to_discs.iteritems():
+        vals = filter(bool, sorted(vals, key=lambda v: len(v)))
+        yield (dim, 'disc', vals)
+
+
+    def expand_candidates(self, cluster, seen=None):
+      for dim, direction, vals in self.dims_to_expand(cluster, seen):
+        if direction  == 'inc':
+          generator = (
+            self.dim_merge(cluster, dim, None, inc, seen) 
+            for inc in vals
+          )
+        elif direction  == 'dec':
+          generator = (
+            self.dim_merge(cluster, dim, dec, None, seen) 
+            for dec in vals
+          )
+        else:
+          generator = (
+            self.disc_merge(cluster, dim, disc)
+            for disc in vals
+          )
+
         generator = ifilter(bool, generator)
-        yield (dim, 'inc', generator)
+        yield (dim, direction, generator)
 
-        generator = (self.dim_merge(cluster, dim, dec, None, seen)
-            for dec in sorted(dim_to_decs[dim], reverse=True))
-        generator = ifilter(bool, generator)
-        yield (dim, 'dec', generator)
 
-      for dim, discs in dim_to_discs.iteritems():
-        print dim, discs
-        generator = (self.disc_merge(cluster, dim, disc)#, seen)
-            for disc in sorted(discs, key=lambda d: len(d)))
-        generator = ifilter(bool, generator)
-
-        yield (dim, 'disc', generator)
 
     def create_filterer(self, cluster, reasons=None):
       def filter_cluster(c, n=None):
@@ -449,7 +478,11 @@ class Merger(object):
 
     @instrument
     def make_adjacency(self, clusters, partitions_complete=True):
-        return AdjacencyGraph(clusters, self.learner.full_table.domain)
+        return AdjacencyGraph(
+          clusters, 
+          self.learner.full_table.domain, 
+          self.learner.cont_dists
+        )
 
         
     def __call__(self, clusters, **kwargs):
