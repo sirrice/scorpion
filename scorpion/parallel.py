@@ -177,9 +177,8 @@ def group_clusters(clusters, learner):
 
   non_children = []
   for c in clusters:
-    if c in child2parent:
-      pass
-    non_children.append(c)
+    if c not in child2parent:
+      non_children.append(c)
 
   non_children = filter_useless_clusters(non_children, learner)
 

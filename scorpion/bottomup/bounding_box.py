@@ -18,8 +18,11 @@ def intersection_box(bbox1, bbox2):
     return (mins, maxs)
 
 def box_contained(box, bound, epsilon=0.):
-    if not len(zip(*box)) or not len(zip(*bound)):
-        return False
+    if not len(zip(*box)) and not len(zip(*bound)):
+      return True
+    if len(zip(*box)) != len(zip(*bound)):
+      print >>sys.stderr, "box_contained: bounding boxes have different dimensions: %d vs %d" % (len(box[0]), len(bound[0]))
+      return False
     inter = intersection_box(box, bound)
     idiffs = [p[1]-p[0] for p in zip(*inter)]
     bdiffs = [p[1]-p[0] for p in zip(*box)]

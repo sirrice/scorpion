@@ -477,7 +477,7 @@ class RangeMerger2(BaseRangeMerger):
           tmp.update([self.disc_merge(c, dim, disc) for c in curset])
 
       tmp = filter(bool, tmp)
-      _logger.debug("# actual expansions\t%d", len(tmp))
+      _logger.debug("# actual expansions\t%d using %d of %d vals\t%d in curset", len(tmp), len(realvals), len(vals), len(curset))
       if not tmp:
         continue
       for c in curset:

@@ -284,7 +284,7 @@ class Cluster(object):
 
   def contains(self, o, epsilon=0.):
     if not box_contained(o.bbox, self.bbox, epsilon=epsilon):
-        return False
+      return False
     return self.discretes_contains(o)
 
   def same(self, o, epsilon=0.):
