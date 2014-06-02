@@ -139,11 +139,9 @@ def serial_hybrid(obj, aggerr, **kwargs):
 
         obj.update_status('clustering results')
         print "nclusters: %d" % len(clusters)
-
         rules = group_clusters(clusters, hybrid)
         costs['rules_cluster'] = time.time() - start
 
-        ncalls = 0
     except:
         traceback.print_exc()
 
@@ -151,7 +149,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
     # return the best rules first in the list
     start = time.time()
     rules.sort(key=lambda r: r.c_range[0])
-    rules = [r.simplify(all_full_table) for r in rules[:10]]
+    rules = [r.simplify(all_full_table) for r in rules]
     costs['rules_simplify'] = time.time() - start
 
     cost = time.time() - full_start
