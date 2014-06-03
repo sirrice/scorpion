@@ -166,19 +166,28 @@ class SharedObj(object):
 
 
 
-def create_sharedobj(dbname, sql, badresults, goodresults, errtype, bad_tuple_ids={}):
+def create_sharedobj(dbname, sql, badresults, goodresults, errtype):
   from arch import get_provenance
   db = connect(dbname)
   obj = SharedObj(db, sql, dbname=dbname)
 
 
   qobj = obj.parsed
+  nonagg = qobj.select.nonaggs[0]
+  xcol = nonagg.cols[0]
+  col_type = db_type(db, qobj.fr, xcol)
+
+  # assumes every aggregate has the same bad keys
+  badresults = extract_agg_vals(badresults, col_type)
+  goodresults = extract_agg_vals(goodresults)
+
   errors = []
   for agg in qobj.select.aggregates:
-      label = agg.shortname
-      aggerr = AggErr(agg, extract_agg_vals(badresults), 20, errtype, {'erreq' : None})
-      errors.append(aggerr)
-      obj.goodkeys[label] = extract_agg_vals(goodresults)
+    aggerr = AggErr(agg, badresults, 20, errtype, {'erreq' : None})
+    errors.append(aggerr)
+
+    label = agg.shortname
+    obj.goodkeys[label] = goodresults
   obj.errors = errors
 
   table = get_provenance(obj, obj.errors[0].agg.cols, obj.errors[0].keys)

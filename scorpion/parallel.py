@@ -1,3 +1,9 @@
+#
+# This file used to be a parallel implementation of scorpion, 
+# now it is the bare bones necessary code to run scorpion 
+# single threaded
+#
+
 import random
 import sys
 import time
@@ -26,151 +32,155 @@ _logger = get_logger()
 
 
 def parallel_debug(sharedobj, **kwargs):
-    for aggerr in sharedobj.errors:
-      parallel_runner(sharedobj, aggerr, **kwargs)
-    create_clauses(sharedobj)
-    
+  for aggerr in sharedobj.errors:
+    parallel_runner(sharedobj, aggerr, **kwargs)
+  
 
 def parallel_runner(sharedobj, aggerr, **kwargs):
-    random.seed(2)
-    sql = sharedobj.sql
-    badresults = aggerr.keys
-    label = aggerr.agg.shortname
-    if not badresults:
-        return
+  random.seed(2)
+  sql = sharedobj.sql
+  badresults = aggerr.keys
+  label = aggerr.agg.shortname
+  if not badresults:
+      return
 
+  try:
     cost, ncalls, table, rules = serial_hybrid(sharedobj, aggerr, **kwargs)
+  except:
+    traceback.print_exc()
+    rules = []
+    table = None
 
-    sharedobj.merged_tables[label] = table
-    rules = zip(rules, reversed(range(len(rules))))
-    sharedobj.rules[label] = rules
-    return table, rules
+  sharedobj.merged_tables[label] = table
+  sharedobj.rules[label] = rules
+  return table, rules
 
 
 
 def serial_hybrid(obj, aggerr, **kwargs):
-    costs = {}
-    db = connect(obj.dbname)
-    obj.db = db
-    obj.update_status('loading inputs into memory')
+  costs = {}
+  db = connect(obj.dbname)
+  obj.db = db
+  obj.update_status('loading inputs into memory')
 
 
-    # get the input records!
-    start = time.time()
-    all_keys = list(chain(aggerr.keys, obj.goodkeys[aggerr.agg.shortname]))
-    all_tables = get_provenance_split(obj, aggerr.agg.cols, all_keys)
-    bad_tables = all_tables[:len(aggerr.keys)]
-    good_tables = all_tables[len(aggerr.keys):]
-    costs['data_load'] = time.time() - start
+  # get the input records!
+  start = time.time()
+  all_keys = list(chain(aggerr.keys, obj.goodkeys[aggerr.agg.shortname]))
+  all_tables = get_provenance_split(obj, aggerr.agg.cols, all_keys)
+  bad_tables = all_tables[:len(aggerr.keys)]
+  good_tables = all_tables[len(aggerr.keys):]
+  costs['data_load'] = time.time() - start
 
-    _logger.debug("bad table counts:  %s" % ', '.join(map(str, map(len, bad_tables))))
-    _logger.debug("good table counts: %s" % ', '.join(map(str, map(len, good_tables))))
-    print "agg error %s \t %s" % (aggerr.agg, aggerr.errtype)
+  _logger.debug("bad table counts:  %s" % ', '.join(map(str, map(len, bad_tables))))
+  _logger.debug("good table counts: %s" % ', '.join(map(str, map(len, good_tables))))
+  print "agg error %s \t %s" % (aggerr.agg, aggerr.errtype)
 
-    
-    cost, ncalls = 0, 0
-    rules = []
-    try:
-        obj.update_status('preparing inputs')
-        full_start = time.time()
-        start = time.time()
-
-        # "id" column is special so we need to deal with it
-        # specially
-        cols = valid_table_cols(bad_tables[0], aggerr.agg.cols, kwargs)
-        all_cols = cols + aggerr.agg.cols        
-        if 'id' not in all_cols:
-          all_cols.append('id')
-        torm = [attr.name for attr in bad_tables[0].domain if attr.name not in all_cols]
-        _logger.debug("valid cols: %s" % cols)
-
-        bad_tables = [rm_attr_from_domain(t, torm) for t in bad_tables]
-        good_tables = [rm_attr_from_domain(t, torm) for t in good_tables]
-        all_full_table = union_tables(bad_tables, good_tables)
-        full_table = union_tables(bad_tables)
-        print "total # rows:\t%d" % len(full_table)
-
-        costs['data_setup'] = time.time() - start
+  
+  cost, ncalls = 0, 0
+  rules = []
 
 
-        # make sure aggerr keys and tables are consistent one last time
-        if len(bad_tables) != len(aggerr.keys):
-          pdb.set_trace()
-          raise RuntimeError("#badtables (%d) != #aggerr keys (%d)" % (len(bad_tables), len(aggerr.keys)))
+  obj.update_status('preparing inputs')
+  full_start = time.time()
+  start = time.time()
+
+  # "id" column is special so we need to deal with it
+  # specially
+  cols = valid_table_cols(bad_tables[0], aggerr.agg.cols, kwargs)
+  all_cols = cols + aggerr.agg.cols        
+  if 'id' not in all_cols:
+    all_cols.append('id')
+  torm = [attr.name for attr in bad_tables[0].domain if attr.name not in all_cols]
+  _logger.debug("valid cols: %s" % cols)
+
+  bad_tables = [rm_attr_from_domain(t, torm) for t in bad_tables]
+  good_tables = [rm_attr_from_domain(t, torm) for t in good_tables]
+  all_full_table = union_tables(bad_tables, good_tables)
+  full_table = union_tables(bad_tables)
+  print "total # rows:\t%d" % len(full_table)
+
+  costs['data_setup'] = time.time() - start
 
 
-        params = {
-          'obj': obj,
-          'aggerr':aggerr,
-          'cols':cols,
-          'c': obj.c,
-          'c_range': [0.05, 1],
-          'l' : 0.6,
-          'msethreshold': 0.01,
-          'max_wait':5,
-          'granularity': 50,
-          'use_mtuples': False,#True,
-          'DEBUG': False
-        }
-
-        params.update(dict(kwargs))
-
-        if aggerr.agg.func.__class__ in (errfunc.SumErrFunc, errfunc.CountErrFunc):
-          klass = MR 
-          params['c'] = params.get('c', .15)
-
-        else:
-          klass = BDT
-          params.update({
-            'epsilon': 0.0015,
-            'min_improvement': 0.01,
-            'tau': [0.08, 0.5],
-            'p': 0.7
-            })
-          params['c'] = params.get('c', .3)
-
-        if False:
-          klass = SVM
-
-        start = time.time()
-        hybrid = klass(**params)
-        clusters = hybrid(all_full_table, bad_tables, good_tables)
-        costs['rules_get'] = time.time() - start
-
-        obj.update_status('clustering results')
-        print "nclusters: %d" % len(clusters)
-        rules = group_clusters(clusters, hybrid)
-        costs['rules_cluster'] = time.time() - start
-
-    except:
-        traceback.print_exc()
-
-    
-    # return the best rules first in the list
-    start = time.time()
-    rules.sort(key=lambda r: r.c_range[0])
-    rules = [r.simplify(all_full_table) for r in rules]
-    costs['rules_simplify'] = time.time() - start
-
-    cost = time.time() - full_start
+  # make sure aggerr keys and tables are consistent one last time
+  if len(bad_tables) != len(aggerr.keys):
+    pdb.set_trace()
+    raise RuntimeError("#badtables (%d) != #aggerr keys (%d)" % (len(bad_tables), len(aggerr.keys)))
 
 
-    print "found rules"
-    for rule in rules[:5]:
-      print "%.5f\t%s" % (rule.quality, rule)
+  params = {
+    'obj': obj,
+    'aggerr':aggerr,
+    'cols':cols,
+    'c': obj.c,
+    'c_range': [0.05, 1],
+    'l' : 0.6,
+    'msethreshold': 0.01,
+    'max_wait':5,
+    'granularity': 50,
+    'use_mtuples': False,#True,
+    'DEBUG': False
+  }
 
-    print "=== Costs ==="
-    for key, cost in costs.iteritems():
-      print "%.5f\t%s" % (cost, key)
-    
-    return cost, ncalls, table, rules
+  params.update(dict(kwargs))
+
+  if aggerr.agg.func.__class__ in (errfunc.SumErrFunc, errfunc.CountErrFunc):
+    klass = MR 
+  else:
+    klass = BDT
+    params.update({
+      'epsilon': 0.0015,
+      'min_improvement': 0.01,
+      'tau': [0.08, 0.5],
+      'p': 0.7,
+      'c': params.get('c', .3)
+      })
+
+  if False:
+    klass = SVM
+
+  start = time.time()
+  hybrid = klass(**params)
+  clusters = hybrid(all_full_table, bad_tables, good_tables)
+  costs['rules_get'] = time.time() - start
+
+  obj.update_status('clustering results')
+  print "nclusters: %d" % len(clusters)
+  rules = group_clusters(clusters, hybrid)
+  costs['rules_cluster'] = time.time() - start
+
+  
+  # return the best rules first in the list
+  start = time.time()
+  rules.sort(key=lambda r: r.c_range[0])
+  rules = [r.simplify(all_full_table) for r in rules]
+  costs['rules_simplify'] = time.time() - start
+
+  cost = time.time() - full_start
+
+
+  print "found rules"
+  for rule in rules[:5]:
+    print "%.5f\t%s" % (rule.quality, rule)
+
+  print "=== Costs ==="
+  for key, cost in costs.iteritems():
+    print "%.5f\t%s" % (cost, key)
+  
+  return cost, ncalls, full_table, rules
+
+
+
 
 
 
 def group_clusters(clusters, learner):
+  """
+  filter subsumed rules (clusters) and group them by
+  those with similar influence on the user selected results
+  """
   # find hierarchy relationships
-  # find equivalent rules via records matched
-  # find equivalent rules via inf_state
   child2parent = get_hierarchies(clusters)
 
   non_children = []
@@ -189,6 +199,9 @@ def group_clusters(clusters, learner):
   return filter(bool, map(group_to_rule, groups))
 
 def get_hierarchies(clusters):
+  """
+  Return a child -> parent relationship mapping
+  """
   child2parent = {}
   for idx, c1 in enumerate(clusters):
     for c2 in clusters[idx+1:]:
@@ -199,6 +212,10 @@ def get_hierarchies(clusters):
   return child2parent
 
 def filter_useless_clusters(clusters, learner):
+  """
+  if cluster doesn't affect outliers enough (in absolute terms),
+  then throw it away
+  """
   THRESHOLD = 0.01
   mean_val = np.mean([ef.value for ef in learner.bad_err_funcs])
   threshold = THRESHOLD * mean_val
@@ -207,6 +224,10 @@ def filter_useless_clusters(clusters, learner):
   return filter(f, clusters)
 
 def merge_clauses(clusters):
+  """
+  assuming the clusters match the same input records, combine their clauses
+  into a single cluster
+  """
   if len(clusters) == 0: return None
   if len(clusters) == 1: return clusters[0]
   conds = {}
@@ -220,6 +241,10 @@ def merge_clauses(clusters):
 
 
 def group_to_rule(clusters):
+  """
+  pick a representative cluster from the arguments and 
+  return a single one
+  """
   if len(clusters) == 0: return None
   rule = max(clusters, key=lambda c: r_vol(c.c_range)).rule
   for c in clusters[1:]:
@@ -237,6 +262,9 @@ def group_by_inf_state(clusters):
   return group_by_features(clusters, f)
 
 def group_by_tuple_ids(clusters):
+  """
+  group the clusters by the set of input tuples they match
+  """
   def f(cluster):
     ids = [int(row['id'].value) for row in cluster.rule.examples]
     ids.sort()

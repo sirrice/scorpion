@@ -46,12 +46,6 @@ _logger = get_logger()
 # expand input dataset
 # score(inputs)
 
-def get_distribution(obj, aggerr, goodresults):
-    goodtable = get_provenance(obj, aggerr.agg.cols, goodresults)
-    err_func = aggerr.error_func
-    err_func.setup(goodtable)
-    good_dist = err_func.distribution(goodtable)
-    return good_dist
 
 
 def get_provenance(sharedobj, cols, keys):
@@ -155,144 +149,68 @@ def extract_agg_vals(vals, col_type):
 
 
 
-def parse_debug_args(db, form, dbname=None):
-    data = json.loads(form.get('data', '{}'))
-    goodkeys = json.loads(form.get('goodkeys', '{}'))
-    errids = json.loads(form.get('bad_tuple_ids', '{}'))
-    sql = form['query']
-    attrs = json.loads(form.get('attrs', '[]'))
-
-    errids = dict([(key.strip('()'), ids) for key, ids in errids.items()])
-
-    try:
-      c = float(form.get('c', 0.3))
-    except:
-      c = 0.3
-
-    obj = SharedObj(db, sql, bad_tuple_ids=errids)
-    obj.c = c
-
-    ignore_attrs = set(obj.attrnames).difference(attrs)
-    ignore_attrs.add('finan_icu_days')
-    obj.ignore_attrs = ignore_attrs
-    qobj = obj.parsed    
-
-
-    erreq = errtype = None
-    if 'errtype' in form:
-      errtype = int(form['errtype'])
-      try:
-		    erreqs = json.loads(form.get('erreq', '{}')) # only if error type == EQUALTO
-      except:
-        erreqs = {}
-
-    nonagg = qobj.select.nonaggs[0]
-    col_type = db_type(db, qobj.fr, nonagg.cols[0])
-    
-    errors = []
-    for agg in qobj.select.aggregates:
-        label = agg.shortname
-        if label not in data:
-            continue
-
-        if errtype == ErrTypes.EQUALTO:
-          erreq = erreqs[label]
-          if len(erreq) != len(data[label]):
-            raise RuntimeError("errtype was EQUAL but number of erreq values (%d) != number of aggs (%d) for agg %s" % (len(erreq), len(data[label]), label))
-          print "erreq for %s: %s" % (label, ', '.join(map(str,erreq)))
-
-        bad_keys = extract_agg_vals(data[label], col_type)
-        err = AggErr(agg, bad_keys, 20, errtype, {'erreq' : erreq})
-        errors.append(err)
-        obj.goodkeys[label] = extract_agg_vals(goodkeys.get(label, []), col_type)
-
-    obj.errors = errors
-    obj.dbname = dbname
-
-    return obj
-
-
-
-
-
-
-
-
-
-
-
 
 def is_discrete(attr, col):
-    if attr in [
-      'epochid', 'voltage', 'xloc', 'yloc', 
-      'est', 'height', 'width', 'atime', 'v',
-      'light', 'humidity', 'age', 
-      'finan_icu_days', 'dxage', 'job_count']:
-        return False
-    if attr in ['recipient_zip', 'sensor', 'moteid' 'file_num']:
-        return True
+  """
+  Determines if a column is discrete or continuous.
 
-    # continuous or discrete?
-    # uniquecol = set(col)
-    # nonnulls = filter(lambda x:x, col)
-    # strtypes = map(lambda c: isinstance(c, str), nonnulls[:20])
-    # istypestr = reduce(operator.or_, strtypes) if strtypes else True
+  A huge number of special cases so we don't need to solve this 
+  problem for the paper
+  """
+  if attr in [
+    'epochid', 'voltage', 'xloc', 'yloc', 
+    'est', 'height', 'width', 'atime', 'v',
+    'light', 'humidity', 'age', 
+    'finan_icu_days', 'dxage', 'job_count']:
+      return False
+  if attr in ['recipient_zip', 'sensor', 'moteid' 'file_num']:
+      return True
 
-    # if its strings
-    nonnulls = filter(lambda x:x, col)
-    strtypes = map(lambda c: isinstance(c, basestring), nonnulls[:20])
-    istypestr = reduce(operator.or_, strtypes) if strtypes else True
-    if istypestr:
-        return True
+  # continuous or discrete?
+  # uniquecol = set(col)
+  # nonnulls = filter(lambda x:x, col)
+  # strtypes = map(lambda c: isinstance(c, str), nonnulls[:20])
+  # istypestr = reduce(operator.or_, strtypes) if strtypes else True
 
-    # if its floats
-    try:
-        isints = map(lambda v: int(v) == float(v), nonnulls)
-        istypeint = reduce(operator.and_, isints) if isints else True
-        if not istypeint:
-            return False
-    except:
-        pass
+  # if its strings
+  nonnulls = filter(lambda x:x, col)
+  strtypes = map(lambda c: isinstance(c, basestring), nonnulls[:20])
+  istypestr = reduce(operator.or_, strtypes) if strtypes else True
+  if istypestr:
+      return True
 
-    # or if there are too many unique values
-    uniquecols = set(nonnulls)
-    if len(uniquecols) > 0.05 * len(col):
-        return False
+  # if its floats
+  try:
+      isints = map(lambda v: int(v) == float(v), nonnulls)
+      istypeint = reduce(operator.and_, isints) if isints else True
+      if not istypeint:
+          return False
+  except:
+      pass
 
-    return True
+  # or if there are too many unique values
+  uniquecols = set(nonnulls)
+  if len(uniquecols) > 0.05 * len(col):
+      return False
+
+  return True
 
 def detect_discrete_cols(rows, attrs):
-    attrs = list(attrs)
-    cols = map(list, zip(*rows))
-    dcols = []
-    for idx, (attr, col) in enumerate(zip(attrs, cols)):
-      if is_discrete(attr, col):
-        dcols.append(attr)
-    return dcols
-
-def bad_row_mask(schema, cols):
-  """
-  returns a mask that is a 1D boolean array with length arr.shape[0]
-  where the value is
-    1 if row should be preserved
-    0 if row should be removed
-  """
-  bad_attrs = ['moteid', 'sensor']
-  mask = np.zeros(len(cols[0])).astype(bool)
-  for attr, col in zip(schema, cols):
-    if attr not in bad_attrs: continue
-    colmask = np.equal(col, None) | (col == 'None')
-    mask |= colmask
-
-  try:
-    return np.invert(mask)
-  except:
-    pdb.set_trace()
-
+  attrs = list(attrs)
+  cols = map(list, zip(*rows))
+  dcols = []
+  for idx, (attr, col) in enumerate(zip(attrs, cols)):
+    if is_discrete(attr, col):
+      dcols.append(attr)
+  return dcols
 
 
 def orange_schema_funcs(cols, attrs):
   """
+  Args
+    cols:  values of table in columnar format
+           list of columns. each column is a list of values
+    attrs: list of attribute names for each column
   @return (Domain, [funcs]) funcs is list of functions to apply to 
           the corresponding column value
   """
@@ -370,201 +288,4 @@ def create_orange_table(rows, attrs):
   attrs = list(attrs)
   return construct_orange_table(domain, attrs, funcs, cols)
 
-
-def merge_tables(tables):
-    """
-    remove duplicates
-    @return single orange table
-    """
-    domain = tables[0].domain
-    ret = Orange.data.Table(domain)
-    map(ret.extend, tables)
-    ret.remove_duplicates()
-    return ret
-
-
-
-
-
-def create_clauses(sharedobj):
-    """
-    Convert clauses into SQL predicate strings
-    """
-    def filter_clause(clause):
-      if not clause:
-          return False
-      if len(clause) > 1000:
-          _logger.warn( "clause too long\t%d", len(clause))
-          return False
-      return True
-
-    for label, rules in sharedobj.rules.iteritems():
-      rules = map(lambda p: p[0], rules)
-      sharedobj.clauses[label] = []
-      for rule in rules:
-        clauses = rule_to_clauses(rule)
-        clause_str = ' or '.join(clauses)
-        sharedobj.clauses[label].append(clause_str)
-      #clauses = map(lambda rule:
-                    #' or '.join(rule_to_clauses(rule)),
-                    #rules)
-      
-      #sharedobj.clauses[label] = clauses
-
-
-
-
-def rule_to_clauses(rule):
-    try:
-      return sdrule_to_clauses(rule)
-    except:
-      try:
-        return c45_to_clauses(rule.tree)
-      except:
-        try:
-          return tree_to_clauses(rule.tree)
-        except:
-          pass
-    return []
-
-def sdrule_to_clauses(rule):
-    from learners.cn2sd.rule import infinity
-    ret = []
-    for i, c in enumerate(rule.filter.conditions):
-      attr = rule.data.domain[c.position]
-      name = attr.name
-      # _logger.debug( "stringifying\t%s\t%s\t%s\t%s", c, type(c),
-      #                isinstance(c,  Orange.core.ValueFilter_continuous), attr.varType)
-      if isinstance(c, Orange.core.ValueFilter_continuous):
-        # XXX: rounding to the 3rd decimal place as a hack            
-        clause = []#'%s is not null' % name]
-        if c.min == c.max and c.min != -infinity:
-          v = round(c.min, 5)
-          vint = int(v)
-          vfloat = v - vint
-          v = vint + float(str(vfloat).rstrip('0.') or '0')
-          clause.append( 'abs(%s - %s) < 0.001' % (v, name) )
-        else:
-          if c.min != -infinity:
-            clause.append( '%.7f <= %s' % (round(c.min, 5), name) )
-          if c.max != infinity:
-            clause.append( '%s <= %.7f ' % (name, round(c.max, 5)))
-        if clause:
-          ret.append( ' and '.join(clause) )
-      elif attr.varType == orange.VarTypes.Discrete:
-        if len(c.values) == len(attr.values):
-          continue
-        elif len(c.values) == 1:
-          val = attr.values[int(c.values[0])]
-        else:
-          val = [attr.values[int(v)] for v in c.values]
-          val = filter(lambda v: v != None, val)
-        ret.append( create_clause(name, val) )
-
-
-    return [ ' and '.join(ret) ]
-        
-
-def c45_to_clauses(node, clauses=None):
-    clauses = clauses or []
-    if not node:
-        return []
-
-    var = node.tested
-    attr = var.name
-    ret = []
-
-    if node.node_type == 0: # Leaf
-        if int(node.leaf) == 1:
-            ret = ['(%s)' % ' and '.join(clauses)]
-
-    elif node.node_type == 1: # Branch
-        for branch, val in zip(node.branch, attr.values):
-            clause = create_clause(attr,  val)
-            clauses.append( clause )
-            ret.extend( c45_to_clauses(branch, clauses) )
-            clauses.pop()
-
-    elif node.node_type == 2: # Cut
-        for branch, comp in zip(node.branch, ['<=', '>']):
-            clause = create_clause(attr,  node.cut, comp)
-            clauses.append( clause )
-            ret.extend( c45_to_clauses(branch, clauses) )
-            clauses.pop()
-
-    elif node.node_type == 3: # Subset
-        for i, branch in enumerate(node.branch):
-            inset = filter(lambda a:a[1]==i, enumerate(node.mapping))
-            inset = [var.values[j[0]] for j in inset]
-            if len(inset) == 1:
-                clause = create_clause(attr, inset[0])
-            else:
-                clause = create_clause(attr, inset)
-            clause.append( clause )
-            ret.extend( c45_to_clauses(branch, clauses) )
-            clauses.pop()
-
-    ret = filter(lambda c: c, ret)
-    return ret
-
-            
-
-def tree_to_clauses(node, clauses=None):
-    clauses = clauses or []
-    if not node:
-        return []
-
-    ret = []
-    if node.branch_selector:
-        varname = node.branch_selector.class_var.name
-        for branch, bdesc in zip(node.branches,
-                                 node.branch_descriptions):
-            if ( bdesc.startswith('>') or 
-                 bdesc.startswith('<') or 
-                 bdesc.startswith('=') ):
-                clauses.append( '%s %s'% (varname, bdesc) )
-            else:
-                clauses.append( create_clause(varname, bdesc) )
-            ret.extend( tree_to_clauses(branch, clauses) )
-            clauses.pop()
-    else:
-        major_class = node.node_classifier.default_value
-        if major_class == '1' and clauses:
-            ret.append( '(%s)' % ' and '.join(clauses) )
-
-    ret = filter(lambda c: c, ret)
-    return ret
-
-
-def create_clause(attr, val, cmp='='):
-    cmps = ['<', '<=', '>', '>=', '=']
-    if isinstance(val, (list, tuple)):
-        strings = filter(lambda v: isinstance(v, str), val)
-        if len(strings):
-            val = map(quote_sql_str, val)
-        cmp = 'in'
-        val = '(%s)' % ','.join(map(str, val))
-    else:
-        if isinstance(val, str):
-            # it may be a discretized continuous condition (e.g., "<= 5")
-            isnumerical = False
-            for c in cmps:
-                try:
-                    if val.startswith(c):
-                        val = float(val.split(c)[1])
-                        cmp = c
-                        isnumerical = True
-                        break
-                except:
-                    pass
-            if not isnumerical:
-                try:
-                    val = float(val)
-                except:
-                    val = quote_sql_str(val)
-
-    return '%s %s %s' %  (attr, cmp, val)
-    #return '%s is not null and %s %s %s' %  (attr, attr, cmp, val)
-
-        
 
