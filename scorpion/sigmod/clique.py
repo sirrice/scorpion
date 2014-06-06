@@ -16,7 +16,6 @@ from ..bottomup.bounding_box import *
 from ..bottomup.cluster import *
 from ..util import *
 
-from crange import r_vol
 from basic import Basic
 from rangemerger import RangeMerger, RangeMerger2
 from merger import Merger

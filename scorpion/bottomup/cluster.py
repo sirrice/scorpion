@@ -469,11 +469,12 @@ class Cluster(object):
         self.hash = hash((self.bbox, str(discretes)))
       return self.hash
 
+
   @property
   def bound_hash(self):
-      if self._bound_hash is None:
-          self._bound_hash = hash((self.bbox, str(self.discretes)))
-      return self._bound_hash
+    if self._bound_hash is None:
+        self._bound_hash = hash((self.bbox, str(self.discretes)))
+    return self._bound_hash
 
   def __eq__(self, o):
       return hash(self) == hash(o)

@@ -1,8 +1,11 @@
 import pdb
 import random
-from crange import *
+import numpy as np
+from frontier import *
 from matplotlib import pyplot as plt
 random.seed(.2)
+
+from scorpion.util import InfRenderer
 
 
 class Cluster(object):
@@ -15,66 +18,83 @@ class Cluster(object):
     self.bots = bots
     self.c_range = [0.0, 1]
     pairs = zip(self.tops, self.bots)
-    self.inf_func = lambda c: np.mean([t/pow(b,c) for t,b in pairs])
+    f = lambda c: np.mean([t/pow(b,c) for t,b in pairs])
+    self.inf_func = np.vectorize(f)
 
-  def clone(self):
+  def clone(self, *args, **kwargs):
     c = Cluster(self.tops, self.bots)
     c.c_range = list(self.c_range)
     return c
+  
+  @property
+  def bound_hash(self):
+    return hash(str([self.tops, self.bots, self.c_range]))
 
+  def __hash__(self):
+    return hash(str([self.tops, self.bots, self.c_range]))
 
   def __str__(self):
-    return "%d\t%s\t%s\t%.4f, %.4f\t%.4f - %.4f" % (self.id, self.tops, self.bots, self.c_range[0], self.c_range[1],
-        self.inf_func(0), self.inf_func(1))
+    return "%d\t%s\t%s\t%.4f, %.4f\t%.4f-%.4f\t%.4f - %.4f" % (
+        self.id, self.tops, self.bots, self.c_range[0], self.c_range[1],
+        self.c_range[0], self.c_range[1], self.inf_func(0), self.inf_func(1))
 
 clusters = []
 top, bot = 1, 1
-for i in xrange(1500):
+for i in xrange(1000):
   tops = [float(random.randint(0, 20)) for i in xrange(5)]
   bots = [float(random.randint(1, 20)) for i in xrange(5)]
-  clusters.append(Cluster(tops, bots))
+  c = Cluster(tops, bots)
+  clusters.append(c)
 
+
+
+
+
+renderer = InfRenderer('test.pdf')
 
 
 get_frontier = Frontier([0,1])
+start = time.time()
 frontier, removed = get_frontier(clusters)
-frontier = list(frontier)
-removed = list(removed)
+print time.time() - start
+for key, val in get_frontier.stats.items():
+  print key, '\t', val
+for key, val in get_frontier.heap.stats.items():
+  print key, '\t', val
+
+renderer.plot_inf_curves(removed)
+renderer.plot_inf_curves(frontier)
+renderer.plot_active_inf_curves(frontier)
+renderer.new_page()
+renderer.plot_inf_curves(removed)
+renderer.plot_inf_curves(frontier)
+
+for c in clusters:
+  c.c_range = [0,1]
+
+f2 = ContinuousFrontier([0,1])
+start = time.time()
+size = 100
+f2.update(clusters[:500])
+
+for c in clusters[500:]:
+  map(len, f2.update([c]))
+
+print time.time() - start
+for key, val in f2.stats.items():
+  print key, '\t', val
+for key, val in f2.heap.stats.items():
+  print key, '\t', val
 
 
-def frange(b):
-  return (np.arange(50) / 50. * r_vol(b)) + b[0]
-
-def render(ax, c, xs, color='grey', alpha=0.3):
-  ys = map(c.inf_func, xs)
-  ax.plot(xs, ys, alpha=alpha, color=color)
-
-fig = plt.figure(figsize=(4, 4))
-ax = fig.add_subplot(111)
-xs = frange([0, 1])
-miny = min([min(c.inf_func(xs[0]), c.inf_func(xs[1])) for c in clusters])
-maxy = max([max(c.inf_func(xs[0]), c.inf_func(xs[1])) for c in clusters])
-ax.set_xlim(0, 1)
-ax.set_ylim(miny, maxy)
-
-for c in removed:
-  render(ax, c, xs, color='grey', alpha=.2)
-for c in frontier:
-  render(ax, c, frange(c.c_range), color='red')
-fig.savefig('test.pdf')
-
-
+frontier = f2.frontier
+renderer.plot_active_inf_curves(frontier)
+renderer.close()
 
 for c in frontier:
   print c
-print 'removed'
-for c in removed:
-  print c
-
-a = frontier[0]
-if removed:
-  b = removed[-1]
-  a.c_range = [0., 1.]
-  b.c_range = [0., 1.]
-  get_frontier.intersect_ranges(a, b)
+if False:
+  print 'removed'
+  for c in removed:
+    print c
 

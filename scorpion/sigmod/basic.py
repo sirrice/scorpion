@@ -6,6 +6,7 @@ import orange
 import heapq
 sys.path.extend(['.', '..'])
 
+import numpy as np
 from itertools import chain
 from collections import defaultdict
 from sklearn.cluster import AffinityPropagation, KMeans
@@ -19,7 +20,7 @@ from ..util import *
 from ..errfunc import ErrTypes, compute_bad_inf, compute_bad_score, compute_influence
 
 
-inf = float('inf')
+INF = inf = float('inf') # slowly replace inf with INF...
 
 
 
@@ -173,6 +174,7 @@ class Basic(object):
     rule = cluster.rule
     complexity = self.rule_complexity(rule)
     f = lambda c: compute_influence(l, compute_bad_score(bds, bcs, c), maxg, nclauses=complexity)
+    #f = np.frompyfunc(f, 1, 1)
     return f
 
 
@@ -249,12 +251,12 @@ class Basic(object):
       bdist = Orange.statistics.basic.Domain(self.full_table)[idx]
       minv, maxv = bdist.min, bdist.max
       if minv == maxv:
-          return [[-inf, inf]]
+          return [[-INF, INF]]
 
       block = (maxv - minv) / self.granularity
       ranges = [[minv + i*block, minv + (i+1)*block] for i in xrange(self.granularity)]
-      ranges[0][0] = -inf
-      ranges[-1][1] = inf
+      ranges[0][0] = -INF
+      ranges[-1][1] = INF
       return ranges
 
 

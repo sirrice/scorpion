@@ -16,7 +16,6 @@ from ..bottomup.cluster import *
 from ..util import *
 from ..errfunc import compute_bad_inf
 
-from crange import r_lte
 from basic import Basic
 from merger import Merger
 

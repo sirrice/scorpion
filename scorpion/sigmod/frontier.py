@@ -18,6 +18,8 @@ sys.path.extend(['.', '..'])
 from scorpion.util import *
 
 
+
+
 class Frontier(object):
   """
   Iteratively look for the skyline of a list of influence functions
@@ -61,6 +63,7 @@ class Frontier(object):
     return ret, rms
 
   
+  @instrument
   def frontier_to_clusters(self, frontier):
     """
     Return a list of clusters with proper bounds
@@ -79,6 +82,7 @@ class Frontier(object):
   
   def intersect_ranges(self, c1, c2):
     """
+    @deprecated
     Given two clusters, split them up by the bounds where they are each 
     optimal
     """
@@ -148,7 +152,7 @@ class Frontier(object):
       roots = []
       for c2 in clusters:
         if c1 == c2: continue
-        if c2 in ignore: continue
+        #if c2 in ignore: continue
 
         root = heap(c1, c2, cur_inter + self.min_granularity)
         if root is not None:
@@ -203,6 +207,88 @@ class Frontier(object):
 
 
 
+class ContinuousFrontier(Frontier):
+  """
+  Maintains the frontier across a "stream" of cluster objects
+  """
+
+
+  def __init__(self, c_range, min_granularity=0):
+    """
+    Args
+      min_granularity: minimum distance between adjacent intersections
+    """
+    Frontier.__init__(self, c_range, min_granularity=min_granularity)
+
+    # persistent frontier across all clusters this has seen
+    self.frontier = set()
+    self.seen = set()
+
+  @instrument
+  def intersections_with_frontier(self, cluster):
+    for c in self.frontier:
+      if r_vol(r_intersect(c.c_range, cluster.c_range)):
+        yield c
+
+  @instrument
+  def update(self, clusters):
+    """
+    merge clusters in argument with existing frontier
+
+    Return (removed_clusters, added_clusters)
+    """
+    new_spans = []
+    beaten_counts = defaultdict(lambda: 0)
+    arg_frontier = set(self(clusters)[0])
+
+    for c in arg_frontier:
+      if c.bound_hash in self.seen:
+        continue
+
+      c_new_spans = []
+      for cand_idx, cand in enumerate(self.frontier):
+        if r_vol(r_intersect(c.c_range, cand.c_range)) == 0:
+          continue
+        
+        valid_bound = r_intersect(c.c_range, cand.c_range)
+        is_c_best = c.inf_func(valid_bound[0]) > cand.inf_func(valid_bound[0])
+        # the following is indexed into using is_c_best
+        pair = [cand, c]
+
+        cur_inter = valid_bound[0]
+        while cur_inter < valid_bound[1]:
+          root = self.heap(c, cand, cur_inter)
+          if root is None:
+            root = valid_bound[1]
+
+          root = min(valid_bound[1], root)
+          if root <= cur_inter: break
+
+          better_cluster = pair[is_c_best]
+          c_new_spans.append((better_cluster, cur_inter, root))
+          beaten_counts[pair[not is_c_best]] += 1
+
+          cur_inter = root
+          is_c_best = not is_c_best
+
+      if not c_new_spans:
+        new_spans.append((c, c.c_range[0], c.c_range[1]))
+      else:
+        new_spans.extend(c_new_spans)
+
+    safe_frontier = set([c for c, n in beaten_counts.iteritems() if n == 0])
+    rms = set([c for c, n in beaten_counts.iteritems() if n > 0])
+    new_spans = filter(lambda s: s[2] > s[1], new_spans)
+    new_spans = filter(lambda s: s[0] in arg_frontier or s[0] in rms, new_spans)
+
+    new_clusters = self.frontier_to_clusters(new_spans)
+    self.frontier.difference_update(rms)
+    self.frontier.update(new_clusters)
+    self.seen.update([c.bound_hash for c in clusters])
+
+    adds = set([c for c, minc, maxc in new_spans if c in arg_frontier])
+    return rms, adds
+
 
 class Intersection(object):
   """
@@ -211,9 +297,10 @@ class Intersection(object):
   def __init__(self, bound):
     self.cache = defaultdict(list)
     self.bound = bound
-    self.tokey = lambda c1, c2: (min(c1.id, c2.id), max(c1.id, c2.id))
+    self.tokey = lambda c1, c2: (min(c1.bound_hash, c2.bound_hash), max(c1.bound_hash, c2.bound_hash))
     self.zero_thresh = 1e-7
     self.stats = defaultdict(lambda: [0, 0])
+    self.rng = np.arange(5) / 5.
 
   @instrument
   def __call__(self, c1, c2, minv=None, maxv=None):
@@ -231,26 +318,34 @@ class Intersection(object):
     if maxv is not None:
       bound[1] = maxv
 
+
+    if bound[0] == bound[1]:
+      return None
+
     # XXX: make a REALLY big assumption that inf functions
-    #      are convex/concave 
-    xs = ((np.arange(8)/8.) * r_vol(bound)) + bound[0]
-    first = c1.inf_func(xs[0]) < c2.inf_func(xs[0])
-    same = True
-    for x in xs[1:]:
-      if (c1.inf_func(x) < c2.inf_func(x)) != first:
-        same = False
-        break
-    if same: return None
+    #      are convex/concave and that this approximation is correct
+    xs = (self.rng * r_vol(bound)) + bound[0]
+    start = time.time()
+    c1s = c1.inf_func(xs)
+    c2s = c2.inf_func(xs)
+    nbools = (c1s < c2s).sum()
+    nequals = (c1s == c2s).sum()
+    cost = time.time() - start
+    self.stats['aprox_check'][0] += cost
+    self.stats['aprox_check'][1] += 1
+    if nbools == len(xs) or nbools == 0:
+      return None
+    if nequals > 2:
+      return None # wrong to return none
 
-
-    f = lambda v: abs(c1.inf_func(v) - c2.inf_func(v))
+    f = np.vectorize(lambda v: np.abs(c1.inf_func(v) - c2.inf_func(v)))
 
     key = self.tokey(c1, c2)
     if key in self.cache:
       roots = self.cache[key]
     else:
       start = time.time()
-      roots = fsolve(f, bound[0], maxfev=100)
+      roots = fsolve(f, bound[0], maxfev=50)
       roots.sort()
       cost = time.time() - start
       self.stats['fsolve_calls'][0] += cost

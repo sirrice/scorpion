@@ -19,7 +19,7 @@ from ..bottomup.bounding_box import *
 from ..bottomup.cluster import *
 
 from rangemerger import *
-from crange import *
+from frontier import *
 from adjgraph import AdjacencyGraph
 
 _logger = get_logger()

@@ -131,6 +131,25 @@ class InfRenderer(BaseRenderer):
   def new_page(self):
     BaseRenderer.new_page(self)
 
+  def plot_active_inf_curves(self, clusters, color='red', alpha=0.3):
+    alpha = alpha or 0.3
+    color = color or 'red'
+    for c in clusters:
+      xs = (np.arange(100) / 100. * r_vol(c.c_range)) + c.c_range[0]
+      ys = map(c.inf_func, xs)
+      self.sub.plot(xs, ys, color=color, alpha=alpha)
+
+      if not self.ybound:
+        self.xbound = c.c_range
+        self.ybound = [ min(ys), max(ys) ]
+      else:
+        inf_range = [min(ys), max(ys)]
+        self.xbound = [min(zip(self.xbound, c.c_range)[0]),  max(zip(self.xbound, c.c_range)[1])]
+        self.ybound = [min(zip(self.ybound, inf_range)[0]),  max(zip(self.ybound, inf_range)[1])]
+
+    self.set_lims()
+
+
   def plot_inf_curves(self, clusters, c_range=None, color=None, alpha=None):
     """
     By default, renders each cluster's inf curve and colors the valid 
@@ -144,18 +163,9 @@ class InfRenderer(BaseRenderer):
 
     for c in clusters:
       alpha = alpha or 0.3
+      color = color or 'grey'
       ys = map(c.inf_func, xs)
-      if not color:
-        self.sub.plot(xs, ys, color="grey", alpha=0.3 )
-
-        if r_vol(c.c_range):
-          subxs = (np.arange(100) / 100. * r_vol(c.c_range)) + c.c_range[0]
-          subys = map(c.inf_func, subxs)
-          self.sub.plot(subxs, subys, color="red", alpha=0.3)
-      else:
-        color = color or 'grey'
-        self.sub.plot(xs, ys, color=color, alpha=alpha)
-
+      self.sub.plot(xs, ys, color=color, alpha=alpha)
 
       if not self.ybound:
         self.xbound = c_range

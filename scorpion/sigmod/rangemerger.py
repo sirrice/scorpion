@@ -17,7 +17,7 @@ from ..util import *
 from ..bottomup.bounding_box import *
 from ..bottomup.cluster import *
 
-from crange import *
+from frontier import *
 from merger import Merger
 
 _logger = get_logger()

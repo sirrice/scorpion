@@ -24,7 +24,7 @@ from basic import Basic
 from sampler import Sampler
 from merger import Merger
 from rangemerger import RangeMerger, RangeMerger2
-from crange import Frontier, r_vol, r_union
+from frontier import Frontier
 from bdtpartitioner import *
 
 inf = float('inf')
