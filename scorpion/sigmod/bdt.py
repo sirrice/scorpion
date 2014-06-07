@@ -24,6 +24,7 @@ from basic import Basic
 from sampler import Sampler
 from merger import Merger
 from rangemerger import RangeMerger, RangeMerger2
+from streamrangemerger import *
 from frontier import Frontier
 from bdtpartitioner import *
 
@@ -134,61 +135,63 @@ class BDT(Basic):
 
     @instrument
     def merge(self, clusters, nonleaves):
-        if len(clusters) <= 1:
-            return clusters
+      if len(clusters) <= 1:
+          return clusters
 
-        self.update_status("starting merge phase")
-        start = time.time()
-        if [attr for attr in self.full_table.domain if attr.varType == orange.VarTypes.Discrete]:
-          use_mtuples = False
-        else:
-          use_mtuples = self.use_mtuples
-        params = dict(self.params)
-        params.update({
-          'learner_hash': hash(self),
-          'learner' : self,
-          'cols' : self.cols,
-          'c_range': self.c_range,
-          'use_mtuples' : use_mtuples
-        })
-        self.merger = RangeMerger2(**params)
-        #self.merger = Merger(**params)
-
-
-        _logger.debug("compute initial cluster errors. %d clusters", len(clusters))
-        start = time.time()
-        for c in clusters:
-          c.error = self.influence_cluster(c)
-        self.stats['init_cluster_errors'] = [time.time()-start, 1]
+      self.update_status("starting merge phase")
+      start = time.time()
+      if [attr for attr in self.full_table.domain if attr.varType == orange.VarTypes.Discrete]:
+        use_mtuples = False
+      else:
+        use_mtuples = self.use_mtuples
+      params = dict(self.params)
+      params.update({
+        'learner_hash': hash(self),
+        'learner' : self,
+        'cols' : self.cols,
+        'c_range': self.c_range,
+        'use_mtuples' : use_mtuples
+      })
+      #self.merger = StreamRangeMerger(**params)
+      self.merger = RangeMerger2(**params)
+      #self.merger = Merger(**params)
 
 
-        #
-        # Figure out what nonleafs to merge
-        #
-        self.update_status("computing frontier")
-        _logger.debug("compute initial frontier")
-        self.merger.setup_stats(clusters)
-        frontier,_ = Frontier(self.c_range, 0.01)(clusters)
-        #thresh = compute_clusters_threshold(clusters)
-        #frontier = [c for c in clusters if c.error >= thresh]
-        to_add = []
-        _logger.debug("get nonleaves containing frontier")
-        for nonleaf in nonleaves:
-          for c in frontier:
-            if nonleaf.contains(c):
-              nonleaf.error = self.influence_cluster(nonleaf)
-              to_add.append(nonleaf)
-              break
+      merged_clusters = self.merger(to_add)
+      #merged_clusters = self.merger(clusters)
+      self.merge_cost = time.time() - start
 
-        self.update_status("expanding frontier")
-        _logger.debug("second merger pass")
-        to_add.extend(clusters)
-        merged_clusters = self.merger(to_add)
-        #merged_clusters = self.merger(clusters)
-        self.merge_cost = time.time() - start
+      self.merge_stats(self.merger.stats, 'merge_')
+      return merged_clusters
 
-        self.merge_stats(self.merger.stats, 'merge_')
-        return merged_clusters
+    def pick_clusters(self, clusters, nonleaves):
+      """
+      """
+      _logger.debug("compute initial cluster errors. %d clusters", len(clusters))
+      start = time.time()
+      for c in clusters:
+        c.error = self.influence_cluster(c)
+        c.c_range = list(self.c_range)
+        c.inf_func = self.create_inf_func(c)
+      self.stats['init_cluster_errors'] = [time.time()-start, 1]
+
+      self.update_status("computing frontier")
+      _logger.debug("compute initial frontier")
+      frontier,_ = Frontier(self.c_range, 0.001)(clusters)
+      ret = []
+      _logger.debug("get nonleaves containing frontier")
+      for nonleaf in nonleaves:
+        for c in frontier:
+          if nonleaf.contains(c):
+            nonleaf.error = self.influence_cluster(nonleaf)
+            ret.append(nonleaf)
+            break
+
+      self.update_status("expanding frontier (%d rules)" % len(ret))
+      _logger.debug("second merger pass")
+      ret.extend(clusters)
+      return ret
+
 
     def create_rtree(self, clusters):
         if not len(clusters[0].bbox[0]):
@@ -403,7 +406,8 @@ class BDT(Basic):
         self.setup_tables(full_table, bad_tables, good_tables, **kwargs)
 
         clusters, nomerge_clusters = self.get_partitions(full_table, bad_tables, good_tables, **kwargs)
-        self.all_clusters = clusters
+        self.all_clusters = self.pick_clusters(clusters, nomerge_clusters)
+        return [self.all_clusters]
 
 
         _logger.debug('merging')

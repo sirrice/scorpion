@@ -1,3 +1,4 @@
+import numpy as np
 from scorpion.functions import *
 
 
@@ -5,6 +6,7 @@ def compute_bad_inf(bdelta, bcount, c):
   if bcount == 0:
     return 0
   return float(bdelta / pow(bcount, c))
+compute_bad_inf = np.vectorize(compute_bad_inf)
 
 def compute_bad_score(bds, bcs, c, smooth=0.005):
   if not bds: return -float('inf')
@@ -14,12 +16,13 @@ def compute_bad_score(bds, bcs, c, smooth=0.005):
 
   topbots = zip(bds, bcs)
   binfs = [compute_bad_inf(top, bot, c) for top, bot in topbots]
+  binfs = np.array(binfs)#.transpose()
 
   bcs = [(bc > 0) and 1 or smooth for bc in bcs]
   total = float(sum(bcs))
   weights = [bc/total for bc in bcs]
   try:
-    return np.average(binfs, weights=weights)
+    return np.average(binfs, axis=0, weights=weights)
   except:
     import pdb
     pdb.set_trace()

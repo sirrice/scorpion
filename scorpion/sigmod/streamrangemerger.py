@@ -13,78 +13,67 @@ from operator import mul, and_, or_
 from scipy.optimize import fsolve
 from matplotlib import pyplot as plt
 
-from ..util import rm_attr_from_domain, get_logger, instrument
-from ..util.table import *
+from ..util import *
 from ..bottomup.bounding_box import *
 from ..bottomup.cluster import *
 
-from rangemerger import *
 from frontier import *
-from adjgraph import AdjacencyGraph
+from rangemerger import RangeMerger2
 
 _logger = get_logger()
 
-
-class StreamRangeMerger(RangeMerger):
+class StreamRangeMerger(RangeMerger2):
   def __init__(self, *args, **kwargs):
-    RangeMerger.__init__(self, *args, **kwargs)
+    super(StreamRangeMerger, self).__init__(*args, **kwargs)
 
-    self.bad_tables, self.good_tables, self.full_table = load_data(foobar)
-    self.frontier = set()
+    # stores the frontier after each iteration
+    self.seen = set()
+    self.frontiers = []
+    self.adj_graph = None
 
-  def start(self):
-    # spin up thread
+  def get_frontier_obj(self, version):
+    while version >= len(self.frontiers):
+      self.frontiers.append(ContinuousFrontier(self.c_range))
+    return self.frontiers[version]
+
+  def __call__(self, clusters):
+    if not self.adj_graph:
+      self.adj_graph = self.make_adjacency([], True)
+
+    clusters = filter(lambda c: c.bound_hash not in self.seen, clusters)
+    self.seen.update([c.bound_hash for c in clusters])
+
+    self.setup_stats(clusters)
+    self.adj_graph.insert(clusters)
+    self.adj_graph.sync()
+    idx = 0
+    seen = set()
+    ret = set()
+    self.learner.update_status("merger running on %d rules" % len(clusters))
     while True:
-      clusters = self.fetch()
-      if clusters is None:
+      clusters, _ = self.get_frontier_obj(idx)(clusters)
+      if not clusters:
         break
-      frontier = self(clusters)
-      self.respond(frontier)
+      self.print_clusters(clusters)
+      
+      frontier, rms = self.expand_frontier(clusters, seen, version=idx)
 
-  def fetch(self):
-    return []
-  
-  def respond(frontier):
-    return 
+      self.print_clusters(frontier)
+      self.learner.update_status("expand frontier got %d rules" % len(frontier))
+      frontier, rms2 = self.get_frontier_obj(idx+1)(frontier)
+      self.learner.update_status("compare w/prev frontier %d rules" % len(frontier))
+      self.learner.update_status("%d rules improved" % len(frontier.difference(clusters)))
 
-  @instrument
-  def __call__(self, clusters, **kwargs):
-    """
-    Given a new set of clusters, update internal list of top-k
-    Return:
-      top-k computed from new clusters (may not return previous top-ks even if they
-      are still in the top-k)
-    """
-    if not clusters:
-      return list(self.frontier)
-
-    if self.i == 0:
-      self.set_params(**kwargs)
-      self.setup_stats(clusters)
-      self.adj_graph = self.make_adjacency(clusters, self.partitions_complete)
-    self.i += 1
-
-    frontier, removed_clusters = self.get_frontier(clusters + self.frontier)
-    frontier.difference_update(self.frontier)
-
-    clusters_set = set()
-    start = time.time()
-    while len(frontier) > 0:
-
-      new_clusters, removed_clusters = self.expand_frontier(frontier)
-
-      if (not new_clusters.difference(frontier)) or (time.time() - start) > 60:
-        clusters_set = set(new_clusters)
+      if not frontier.difference(clusters):
+        ret.update(frontier)
+        ret.update(rms)
+        ret.update(rms2)
         break
-
-      map(self.adj_graph.remove, removed_clusters)
-      map(self.adj_graph.insert, new_clusters)
-      frontier = new_clusters
-
-    self.learner.merge_stats(self.get_frontier.stats, 'frontier_')
-    self.learner.merge_stats(self.get_frontier.heap.stats, 'inter_heap_')
-    return list(clusters_set)
-  
-
-
+      
+      #self.adj_graph.remove(rms, version=idx)
+      self.adj_graph.insert(frontier, version=idx+1)
+      idx += 1
+    self.learner.update_status("merger ran for %d iterations" % idx)
+    self.print_clusters(ret)
+    return list(ret)
 

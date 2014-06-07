@@ -57,6 +57,9 @@ class FeatureMapper(object):
     return vect
 
 class AdjacencyGraph(object):
+  """
+  Stores versions of adjacency graphs and manages insert buffering
+  """
   def __init__(self, clusters, domain, cont_dists):
     """
     Args
@@ -64,30 +67,62 @@ class AdjacencyGraph(object):
     """
     self.feature_mapper = FeatureMapper(domain, cont_dists)
     self.versions = []
-    self.insert_buf = clusters or []
+    self.insert_bufs = defaultdict(set)
 
-    if self.insert_buf:
-      self.new_version()
+    if clusters:
+      self.insert(clusters)
+      self.sync()
 
-  def new_version(self):
-    v = AdjacencyVersion(self.insert_buf, self.feature_mapper)
+  def sync(self):
+    """
+    apply all of the pending inserts and deletes to the existing
+    versions
+    """
+    for idx, v in enumerate(self.versions):
+      buf = self.insert_bufs[idx]
+      buf.update(v.clusters)
+      self.versions[idx] = AdjacencyVersion(self.feature_mapper)
+      self.versions[idx].bulk_init(list(buf))
+      self.insert_bufs[idx] = set()
+
+  def new_version(self, clusters=None):
+    clusters = clusters or []
+    v = AdjacencyVersion(self.feature_mapper)
     self.versions.append(v)
-    self.insert_buf = []
 
+  def ensure_version(self, version):
+    if version is None: return
+    while len(self.versions) <= version:
+      self.new_version()
+    return self.versions[version]
 
-  def insert(self, cluster):
-    for v in self.versions:
-      if v.contains(cluster):
-        return
-    self.insert_buf.append(cluster)
+  def __len__(self):
+    return len(self.versions)
 
-  def remove(self, cluster):
-    for v in self.versions:
-      if v.remove(cluster):
-        return True
-    return False
+  def insert(self, clusters, version=0):
+    self.ensure_version(version)
+    if not isinstance(clusters, list):
+      clusters = list(clusters)
 
-  def neighbors(self, cluster):
+    v = self.versions[version]
+    clusters = [c for c in clusters if not v.contains(c)]
+    self.insert_bufs[version].update(clusters)
+    return len(clusters)
+
+  def remove(self, clusters, version=0):
+    self.ensure_version(version)
+    if not isinstance(clusters, list):
+      clusters = list(clusters)
+
+    v = self.versions[version]
+    rms = [v.remove(cluster) for cluster in clusters]
+    return rms
+
+  def neighbors(self, cluster, version=None):
+    self.ensure_version(version)
+    if version is not None:
+      return self.versions[version](cluster)
+
     ret = []
     for v in self.versions:
       ret.extend(v.neighbors(cluster))
@@ -96,7 +131,7 @@ class AdjacencyGraph(object):
 
 class AdjacencyVersion(object):
 
-  def __init__(self, clusters, feature_mapper):
+  def __init__(self, feature_mapper):
     #self.partitions_complete = partitions_complete
     self.cid = 0
     self.disc_idxs = {}
@@ -109,7 +144,6 @@ class AdjacencyVersion(object):
     self.clusters = []
     self.id2c = dict()
     self.c2id = dict()
-    self.bulk_init(clusters)
 
   def to_json(self):
     data = {
@@ -198,10 +232,10 @@ class AdjacencyVersion(object):
     return filter(bool, res)
 
   def bulk_init(self, clusters):
-    if clusters:
-      self.setup_rtree(len(clusters[0].bbox[0]), clusters)
+    if not clusters: return
 
-    self.clusters.extend(clusters)
+    self.setup_rtree(len(clusters[0].bbox[0]), clusters)
+    self.clusters = clusters
     for cid, c in enumerate(clusters):
       self.id2c[cid] = c
       self.c2id[c] = cid
@@ -210,13 +244,17 @@ class AdjacencyVersion(object):
       Xs = []
       for cidx, c in enumerate(clusters):
         Xs.append(self.feature_mapper(c, dim))
-      idx = NearestNeighbors(radius=self.radius, algorithm='ball_tree', metric=self.metric)
+      idx = NearestNeighbors(
+          radius=self.radius, 
+          algorithm='ball_tree', 
+          metric=self.metric
+      )
       self.disc_idxs[dim] = idx
       self.disc_idxs[dim].fit(np.array(Xs))
 
   def contains(self, cluster):
     return cluster in self.c2id
-
+  
   def remove(self, cluster):
     if cluster in self.c2id:
       cid = self.c2id[cluster]

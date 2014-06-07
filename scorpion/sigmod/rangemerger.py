@@ -71,9 +71,6 @@ class BaseRangeMerger(Merger):
       c.c_range = list(self.c_range)
       c.inf_range = [c.inf_func(c.c_range[0]), c.inf_func(c.c_range[1])]
 
-    self.rejected_disc_vals = defaultdict(list)
-    self.rejected_cont_vals = defaultdict(set)
-
   def print_clusters(self, clusters):
     rules = clusters_to_rules(clusters, self.learner.full_table)
     rules = ['%.4f-%.4f %s' % (r.c_range[0], r.c_range[1], r) for r in rules]
@@ -117,6 +114,9 @@ class BaseRangeMerger(Merger):
 
     self.set_params(**kwargs)
     self.setup_stats(clusters)
+    self.rejected_disc_vals = defaultdict(list)
+    self.rejected_cont_vals = defaultdict(set)
+
 
     self.learner.update_status("expanding frontier: indexing partitions")
     self.adj_graph = self.make_adjacency(clusters, self.partitions_complete)
@@ -155,6 +155,7 @@ class BaseRangeMerger(Merger):
       for c in frontier:
         c.c_range = list(self.c_range)
 
+      versionid = 0
       while len(frontier) > 0:
         self.learner.update_status("expanding frontier, iter %d" % iteridx)
         iteridx += 1
@@ -166,7 +167,7 @@ class BaseRangeMerger(Merger):
           print "frontier"
           self.print_clusters(frontier)
 
-        new_clusters, removed_clusters = self.expand_frontier(frontier, seen)
+        new_clusters, removed_clusters = self.expand_frontier(frontier, seen, None)
 
         if self.DEBUG:
           self.renderer.plot_inf_curves(removed_clusters, color="grey")
@@ -179,9 +180,10 @@ class BaseRangeMerger(Merger):
           clusters_set.update(new_clusters)
           break
 
-        map(self.adj_graph.remove, removed_clusters)
-        map(self.adj_graph.insert, new_clusters)
-        self.adj_graph.new_version()
+        self.adj_graph.remove(removed_clusters, versionid)
+        self.adj_graph.insert(new_clusters, versionid)
+        self.adj_graph.sync()
+        versionid += 1
         frontier = new_clusters
 
     print "returning %d clusters total!" % len(clusters_set)
@@ -200,13 +202,13 @@ class BaseRangeMerger(Merger):
 
 
   @instrument
-  def expand_frontier(self, frontier, seen):
+  def expand_frontier(self, frontier, seen, version=None):
     """
     Return (newclusters, rmclusters)
     """
     newclusters = set(frontier)
     for cluster in frontier:
-      merges = self.expand(cluster, seen)
+      merges = self.expand(cluster, seen, version=None)
       #for c in rms: c.c_range = list(self.c_range)
       #newclusters.update(rms)
       newclusters.update(merges)
@@ -251,7 +253,7 @@ class BaseRangeMerger(Merger):
 
 
   @instrument
-  def expand(self, c, seen):
+  def expand(self, c, seen, version=None):
     """
     Returns a frontier of clusters expanded from c that
     are possible optimals in _some_ c range
@@ -282,7 +284,7 @@ class BaseRangeMerger(Merger):
 
 
       cur_seen = set()
-      dim_to_bests = self.greedy_expansion(cur, cur_seen)
+      dim_to_bests = self.greedy_expansion(cur, cur_seen, version=version)
       seen.update(cur_seen)
 
       merges = list()
@@ -322,7 +324,7 @@ class BaseRangeMerger(Merger):
       
       for merged in frontier.difference(cur_bests):
         rms.update(merged.parents)
-        self.adj_graph.insert(merged)
+      self.adj_graph.insert(cur_bests)
       seen.update(rms)
 
       cur_bests = frontier
@@ -340,8 +342,8 @@ class BaseRangeMerger(Merger):
 class RangeMerger(BaseRangeMerger):
 
   @instrument
-  def greedy_expansion(self, cur, seen):
-    expansions = self.expand_candidates(cur, seen)
+  def greedy_expansion(self, cur, seen, version=None):
+    expansions = self.expand_candidates(cur, seen, version=version)
 
     dim_to_bests = defaultdict(set)
     for dim, direction, g in expansions:
@@ -449,13 +451,14 @@ class RangeMerger2(BaseRangeMerger):
     for v in vals:
       if not ret or abs(v-ret[-1]) > min_step:
         ret.append(v)
+    ret = random.sample(ret, min(4, len(ret)))
     return ret
 
 
   @instrument
-  def greedy_expansion(self, cluster, seen):
+  def greedy_expansion(self, cluster, seen, version=None):
     curset = set([cluster])
-    for dim, direction, vals in self.dims_to_expand(cluster, seen):
+    for dim, direction, vals in self.dims_to_expand(cluster, seen, version=version):
       if self.DEBUG:
         self.boxrenderer.new_page()
         self.boxrenderer.plot_clusters(curset, color='blue', alpha=0.3)
@@ -473,7 +476,7 @@ class RangeMerger2(BaseRangeMerger):
         for dec in realvals:
           tmp.update([self.dim_merge(c, dim, dec, None, seen) for c in curset])
       else:
-        for disc in vals:
+        for disc in realvals:
           tmp.update([self.disc_merge(c, dim, disc) for c in curset])
 
       tmp = filter(bool, tmp)

@@ -287,7 +287,7 @@ class ContinuousFrontier(Frontier):
     self.seen.update([c.bound_hash for c in clusters])
 
     adds = set([c for c, minc, maxc in new_spans if c in arg_frontier])
-    return rms, adds
+    return adds, rms
 
 
 class Intersection(object):

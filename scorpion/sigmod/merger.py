@@ -225,7 +225,7 @@ class Merger(object):
       merged.parents = [cluster]
       return merged
 
-    def dims_to_expand(self, cluster, seen=None):
+    def dims_to_expand(self, cluster, seen=None, version=None):
       """
       Returns an iteratior of each dimension, direction, and values
       to expand along that dimension
@@ -247,7 +247,7 @@ class Merger(object):
         )
 
       start = time.time()
-      neighbors = self.adj_graph.neighbors(cluster)
+      neighbors = self.adj_graph.neighbors(cluster, version=version)
       cost = time.time() - start
       self.stats['neighbor'][0] += cost
       self.stats['neighbor'][1] += 1
@@ -292,8 +292,8 @@ class Merger(object):
         yield (dim, 'disc', vals)
 
 
-    def expand_candidates(self, cluster, seen=None):
-      for dim, direction, vals in self.dims_to_expand(cluster, seen):
+    def expand_candidates(self, cluster, seen=None, version=None):
+      for dim, direction, vals in self.dims_to_expand(cluster, seen, version=version):
         if direction  == 'inc':
           generator = (
             self.dim_merge(cluster, dim, None, inc, seen) 
