@@ -20,7 +20,8 @@ setup(name="scorpion",
       scripts = [
         'tests/unit/adjgraph.py',
         'tests/unit/sharedobj.py',
-        'tests/unit/render.py'
+        'tests/unit/render.py',
+        'tests/unit/sharedobj.py'
       ],
       package_data = {
         'scorpion': [

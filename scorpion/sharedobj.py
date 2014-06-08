@@ -34,12 +34,14 @@ from sqlparser import *
 class SharedObj(object):
 
   def __init__(
-      self, db, sql,
+      self, db,
       errors=[],
       goodkeys={},
       ignore_attrs=[],
       schema=[],
       dbname=None,
+      parsed=None,
+      params=[],
       **kwargs):
     if not db and not dbname:
         raise "SharedObj requires a database connection!"
@@ -47,16 +49,11 @@ class SharedObj(object):
     dbname = dbname or str(self.db.url).split("/")[-1]
     self.monetdb = connect(dbname, engine='monet')
     self.dbname = dbname
-    if 'parsed' in kwargs:
-      self.parsed = kwargs['parsed']
-    else:
-      self.parsed = parse_sql(db, sql)
-    if len(self.parsed.fr) > 1:
-        # XXX: only support single table queries
-        raise "Don't support joins yet!"
+    self.parsed = parsed
+    self.params = params   # parameters for parsed SQL object
     self.errors = errors
     self.goodkeys = goodkeys or {}
-    self.schema = schema or SharedObj.get_schema(db, self.parsed.tables[0])
+    self.schema = schema or db_schema(db, self.parsed.tables[0])
     # aggregate type -> {groupby key -> ids of "bad" tuples}
     self.ignore_attrs = ignore_attrs
     self.merged_tables = {}
@@ -69,7 +66,26 @@ class SharedObj(object):
     # should be set when creating SharedObj
     self.status = None   
     
+    if not self.parsed:
+      raise Error("expected a parsed SQL object!")
+
+    if len(self.parsed.fr) > 1:
+        # XXX: only support single table queries
+        raise "Don't support joins yet!"
+
       
+  def clone(self):
+    return SharedObj(
+      self.db, 
+      parsed=self.parsed,
+      dbname=self.dbname,
+      errors=self.errors,
+      goodkeys=self.goodkeys,
+      ignore_attrs=self.ignore_attrs,
+      schema=self.schema,
+      params=self.params
+    )
+
   def get_tuples(self, keys, attrs=None):
     try:
         if keys is None or not len(list(keys)):
@@ -77,20 +93,8 @@ class SharedObj(object):
     except:
         pass
     attrs = attrs or self.rules_schema
-        
     return [list(row) for row in self.get_filter_rows(keys=keys, attrs=attrs)]
     
-
-  def clone(self):
-    return SharedObj(
-      self.db, 
-      self.sql,
-      dbname=self.dbname,
-      errors=self.errors,
-      goodkeys=self.goodkeys,
-      ignore_attrs=self.ignore_attrs,
-      schema=self.schema
-    )
 
   
   def get_filter_rows(self, keys=None, attrs=None, where=None):
@@ -103,39 +107,11 @@ class SharedObj(object):
     if where:
         qobj.where.append(where)
 
-    params = []
+    params = list(self.params)
     if keys:
-      params = [[tuple(list(keys))]]
-    return query(self.db, str(qobj), params)
+      params.append(tuple(list(keys)))
 
-
-  @staticmethod
-  def get_schema(db, table):
-    """
-    @return dictionary of column name -> data type
-    """
-    typedict = [('int', int), ('double', float),
-                ('timestamp', datetime),
-                ('date', date), ('time', dttime),
-                ('text', str), ('char', str)]
-    ret = {}
-    q = '''select column_name, data_type
-            from information_schema.columns
-            where table_name = %s;'''
-    #q = """select c.name, c.type from sys.columns as c, sys.tables as t where table_id = t.id and t.name = %s;"""
-    # and data_type != 'date' and position('time' in data_type) =
-    # 0 and column_name != 'humidity'
-    for row in query(db, q, (table,)):
-        name, dtype = tuple( row[:2] )
-        name = str(name)
-        for tn, tt in typedict:
-            if tn in dtype:
-                ret[name] = tt
-                break
-        if name not in ret:
-            msg = "can't find type of %s\t%s"
-            raise RuntimeError(msg % (name, dtype))
-    return ret
+    return query(self.db, str(qobj), [params])
 
 
   def get_rules_schema(self):
@@ -155,6 +131,10 @@ class SharedObj(object):
     if self.status:
       self.status.update_status(s)
 
+  def update_rules(self, label, rules):
+    if self.status:
+      self.status.update_rules(label, rules)
+
   attrnames = property(lambda self: self.schema.keys())
   rules_schema = property(get_rules_schema)
   sql = property(lambda self: str(self.parsed))
@@ -169,7 +149,8 @@ class SharedObj(object):
 def create_sharedobj(dbname, sql, badresults, goodresults, errtype):
   from arch import get_provenance
   db = connect(dbname)
-  obj = SharedObj(db, sql, dbname=dbname)
+  parsed = parse_sql(sql)
+  obj = SharedObj(db, parsed=parsed, dbname=dbname)
 
 
   qobj = obj.parsed

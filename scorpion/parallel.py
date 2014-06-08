@@ -148,7 +148,8 @@ def serial_hybrid(obj, aggerr, **kwargs):
     clusters = []
     par2chq = Queue()
     ch2parq = Queue()
-    proc = Process(target=merger_process_f, args=(learner, params, (par2chq, ch2parq)))
+    args = (learner, aggerr, params, (par2chq, ch2parq))
+    proc = Process(target=merger_process_f, args=args)
     proc.start()
 
     # loop
@@ -156,17 +157,20 @@ def serial_hybrid(obj, aggerr, **kwargs):
       batch_dicts = [c.to_dict() for c in batch]
       print "send to child proc %d rules" % len(batch_dicts)
       par2chq.put(batch_dicts)
+      print "done"
+      #par2chq.put(batch)
     print "send to child proc DONE"
     par2chq.put('done')
     par2chq.close()
 
     while True:
       try:
-        batch_dicts = ch2parq.get()
-        if batch_dicts == 'done':
+        batch = ch2parq.get()
+        if batch == 'done':
           break
-        print "got %d from merger proc" % len(batch_dicts)
-        clusters.extend(map(Cluster.from_dict, batch_dicts))
+        print "got %d from merger proc" % len(batch)
+        batch = [Cluster.from_dict(d) for d in batch]
+        clusters.extend(batch)
       except IOError:
         print "got io error"
         continue
@@ -202,6 +206,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
   start = time.time()
   rules = group_clusters(clusters, learner)
   costs['rules_cluster'] = time.time() - start
+  learner.update_rules(aggerr.agg.shortname, rules)
 
   
   # return the best rules first in the list
@@ -223,7 +228,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
   return full_table, rules
 
 
-def merger_process_f(learner, params, (in_conn, out_conn)):
+def merger_process_f(learner, aggerr, params, (in_conn, out_conn)):
   # create and launch merger
   params = dict(params)
   params.update({
@@ -238,8 +243,8 @@ def merger_process_f(learner, params, (in_conn, out_conn)):
   done = False
   while not done:
     try:
-      cluster_dicts = in_conn.get()
-      if cluster_dicts == 'done': 
+      dicts = in_conn.get()
+      if dicts == 'done': 
         done = True
         break
 
@@ -252,7 +257,7 @@ def merger_process_f(learner, params, (in_conn, out_conn)):
         if data == 'done':
           done = True
           break
-        cluster_dicts.extend(data)
+        dicts.extend(data)
 
     except EOFError:
       break
@@ -261,7 +266,7 @@ def merger_process_f(learner, params, (in_conn, out_conn)):
 
     try:
       clusters = []
-      for d in cluster_dicts:
+      for d in dicts:
         c = Cluster.from_dict(d)
         c.to_rule(learner.full_table, learner.cont_dists, learner.disc_dists)
         learner.influence_cluster(c)
@@ -270,19 +275,22 @@ def merger_process_f(learner, params, (in_conn, out_conn)):
         clusters.append(c)
 
       merged = merger(clusters)
+      rules = group_clusters(merged, learner)
+      learner.update_rules(aggerr.agg.shortname, rules)
     except Exception as e:
+      print "problem in merger process"
+      print e
       import traceback
       traceback.print_exc()
       merged = []
 
-    merged_json = [c.to_dict() for c in merged]
-    print "send merged json %d" % len(merged_json)
-    out_conn.put(merged_json)
+    print "send merged back %d" % len(merged)
+    out_conn.put([c.to_dict() for c in merged])
 
-  print "child DONE"
   out_conn.put('done')
   in_conn.close()
   out_conn.close()
+  print "child DONE"
 
 
 
@@ -290,6 +298,9 @@ def group_clusters(clusters, learner):
   """
   filter subsumed rules (clusters) and group them by
   those with similar influence on the user selected results
+
+  Return
+    list of rule objects sorted by c_range[0]
   """
   # find hierarchy relationships
   child2parent = get_hierarchies(clusters)
@@ -309,7 +320,9 @@ def group_clusters(clusters, learner):
     subgroup = filter(bool, map(merge_clauses, subgroups.values()))
     groups.append(subgroup)
 
-  return filter(bool, map(group_to_rule, groups))
+  rules = filter(bool, map(group_to_rule, groups))
+  rules.sort(key=lambda r: r.c_range[0])
+  return rules
 
 def get_hierarchies(clusters):
   """

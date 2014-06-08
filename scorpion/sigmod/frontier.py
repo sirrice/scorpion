@@ -230,6 +230,7 @@ class ContinuousFrontier(Frontier):
       if r_vol(r_intersect(c.c_range, cluster.c_range)):
         yield c
 
+
   @instrument
   def update(self, clusters):
     """

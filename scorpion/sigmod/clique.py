@@ -153,7 +153,7 @@ class MR(Basic):
         if self.top_k(ro):
           nadded += 1
 
-        if nadded % 50 == 0 and nadded > 0:
+        if nadded % 25 == 0 and nadded > 0:
           to_yield = map(self.blah_to_cluster, set(self.best).difference(seen))
           seen.update(self.best)
           all_bests.update(to_yield)

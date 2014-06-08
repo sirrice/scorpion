@@ -487,6 +487,10 @@ class SDRule(object) :
         return None
 
     def condToDict(self, c):
+      """
+      Translate condition into a dictionary necoding the column, data type and values
+      Useful for JSONifying the rule
+      """
       ret = {
         'col': None,
         'type': None,
@@ -510,9 +514,12 @@ class SDRule(object) :
         ret['vals'] = vals
       else:
         ret['type'] = 'num'
+
         if any([t in str(type(c.min)) for t in ['date', 'time']]):
           ret['type'] = 'timestamp'
-        ret['vals'] = [c.min, c.max]
+        
+        ret['vals'] = [max(-1e100, c.min), min(1e100, c.max)]
+
       return ret
 
 
@@ -650,311 +657,35 @@ class SDRules(object):
             rs = rule.printRule()
             print rs
 
+def rule_to_json(rule, **kwargs):
+  """
+  Args
+    kwargs: other key-val pairs to add in the json object
+            e.g., yalias: "xxx"
+  Returns
+    JSON object
+  """
+  clause_parts = rule.toCondDicts()
+  alt_rules = []
+  if hasattr(rule, 'cluster_rules'):
+    for r in rule.cluster_rules:
+      dicts = r.toCondDicts()
+      alt_rules.append(dicts)
 
-#
-# Utility functions for list of rules
-#
+  def rnd(v):
+    if v == float('-inf'): return -1e100
+    if v == float('inf'): return 1e100
+    return round(v, 3)
 
-class RuleBound(object):
-
-    def __init__(self, ref_bounds, rule=None, bounds=None, roots=None):
-        self.ref_bounds = ref_bounds
-        self.rule = rule
-        self.bounds = bounds
-        self.roots = roots
-
-        if self.rule and not self.bounds:
-            self.bounds = self.rule_to_bounds()
-
-        self.id = hash(str(self))
-        
-        if not self.roots:
-            self.roots = [self.id]
-
-        self.area = self.get_area()
-
-        
-    def __hash__(self):
-        return self.id
-
-    def __eq__(self, o):
-        return hash(o) == hash(self)
-
-    def __str__(self):
-        b = self.bounds
-        ret = []
-        for key in sorted(b.keys()):
-            if key.startswith('_'): continue
-            ret.append(key)
-            try:
-                ret.append(('%.4f ' * len(b[key][1])) % tuple(b[key][1]))
-            except:
-                ret.append(str(b[key][1]))
-        return ':'.join(ret)
-
-    def normalize_bounds(self):
-        bounds = self.bounds
-        if bounds:
-            for key, (isd, vals) in bounds.iteritems():
-                if isd:
-                    bounds[key] = (isd, set(vals))
-                else:
-                    ref_isd, refb = self.ref_bounds[key]
-                    vals = ((vals[0] - refb[0]) / (refb[1]-refb[0]),
-                            (vals[1] - refb[0]) / (refb[1]-refb[0]))
-                    bounds[key] = (isd, vals)
-        self.area = self.get_area()                    
-        return bounds
-
-    def unnormalize_bounds(self):
-        bounds = self.bounds
-        if bounds:
-            for key, (isd, vals) in bounds.iteritems():
-                if isd:
-                    bounds[key] = (isd, set(vals))
-                else:
-                    ref_isd, refb = self.ref_bounds[key]
-                    vals = ((vals[0] * (refb[1]-refb[0])) + refb[0],
-                            (vals[1] * (refb[1]-refb[0])) + refb[0])
-                    bounds[key] = (isd, vals)
-        self.area = self.get_area()                    
-        return bounds
-        
-
-    def to_rule(self, data):
-        if self.rule:
-            ret = self.rule.clone()
-            ret.set_data(data)
-            return ret
-
-        domain = data.domain
-        conds = []
-        for key in sorted(self.bounds.keys()):
-            if key.startswith('_'):
-                continue
-            ref_isd, refb = self.ref_bounds[key]
-            isd, vals = self.bounds[key]
-            attr = domain[key]
-            pos = domain.index(attr)
-            
-            if ref_isd:
-                conds.append(orange.ValueFilter_discrete(
-                    position = pos,
-                    values = [orange.Value(attr, v) for v in vals]
-                    )
-                )
-            else:
-                
-                conds.append(orange.ValueFilter_continuous(
-                    position = pos,
-                    oper = orange.ValueFilter.Between,
-                    min = vals[0],
-                    max = vals[1]
-                    )
-                )
-                
-        return SDRule(data, None, conds)
-            
-
-    def rule_to_bounds(self):
-        rule = self.rule
-        domain = rule.data.domain
-        bounds = {}
-
-        for c in rule.filter.conditions:
-            attr = domain[c.position]
-            name = attr.name
-            pos = domain.index(attr)
-            is_discrete = attr.varType == orange.VarTypes.Discrete
-
-            # transform each attribute to the same type as the
-            # reference
-            if self.ref_bounds[name][0]:
-                if is_discrete:
-                    vals = set([attr.values[int(vidx)]
-                                for vidx in c.values])
-                else:
-                    vals = set([v for v in self.ref_bounds[name]
-                                if v >= c.min and v < c.max])
-            else:
-                if is_discrete:
-                    vals = (min(vals), max(vals))
-                else:
-                    vals = [c.min, c.max]                    
-                    
-
-            is_discrete = self.ref_bounds[name][0]
-            bounds[attr.name] = (is_discrete, vals)
-
-        return bounds
-
-
-    def union_range(self, attrname, r1, r2):
-        """
-        @param r1 a tuple of (is_discrete, values).  if null, then we
-        use the range defined in self.bounds
-        @param r2 see r1
-        @return a tuple of (is_discrete, values) thas represents the
-        union of the two ranges.  
-        """
-        if not r1 or not r2:
-            return self.bounds[attrname]
-
-        isd1, isd2 = r1[0], r2[0]
-        vals1, vals2 = r1[1], r2[1]
-        isd = isd1 and isd2
-
-        if isd:
-            vals = set(vals1).union(set(vals2))
-        else:
-            if isd1:
-                vals1 = [vals1[0], vals1[1]]
-            if isd2:
-                vals2 = [vals2[0], vals2[1]]
-            vals = min(vals1[0], vals2[0]), max(vals1[1], vals2[1])
-
-        return isd, vals
-
-
-    def intersect_range(self, attrname, r1, r2):
-        if not r1:
-            return r2
-        if not r2:
-            return r1
-
-        isd1, isd2 = r1[0], r2[0]
-        vals1, vals2 = r1[1], r2[1]
-        isd = isd1 or isd2
-
-        if isd:
-            if not isd1:
-                vals1 = [v for v in self.bounds[attrname]
-                         if v >= vals1[0] and v < vals1[1]]
-            if not isd2:
-                vals2 = [v for v in self.bounds[attrname]
-                         if v >= vals2[0] and v < vals2[1]]
-            vals = set(vals1).intersection(set(vals2))
-        else:
-            vals = max(vals1[0], vals2[0]), min(vals1[1], vals2[1])
-
-        return isd, vals
-
-
-    def intersect(self, rb):
-        keys = set(self.bounds.keys()).union(rb.bounds.keys())
-        ret = {}
-        for key in keys:
-            if key.startswith('_'): continue
-            r1 = self.bounds.get(key, None)
-            r2 = rb.bounds.get(key, None)
-            ret[key] = self.intersect_range(key, r1, r2)
-        
-        return RuleBound(self.ref_bounds, bounds=ret, roots=self.roots+rb.roots)
-
-    def union(self, rb):
-        keys = set(self.bounds.keys()).intersection(rb.bounds.keys())
-        ret = {}
-        for key in keys:
-            if key.startswith('_'): continue
-            r1 = self.bounds.get(key, None)
-            r2 = rb.bounds.get(key, None)
-            ret[key] = self.union_range(key, r1, r2)
-
-        return RuleBound(self.ref_bounds, bounds=ret, roots=self.roots+rb.roots)
-
-    def too_different(self, rb):
-        """
-        if any of the dimensions are > 10x different
-        """
-        if len(self.bounds) != len(rb.bounds):
-            return True
-        keys = set(self.bounds.keys()).intersection(rb.bounds.keys())
-
-        for key in keys:
-            if key not in self.bounds or key not in rb.bounds:
-                return True
-            isd1, vals1 = self.bounds[key]
-            isd2, vals2 = rb.bounds[key]
-
-            if not isd1:
-                v1 = (vals1[1] - vals1[0])
-                v2 = (vals2[1] - vals2[0])
-                if v1 > 100 * v2 or v2 > 100 * v1:
-                    return True
-        return False
-                
-
-    def get_area(self):
-        ret = 1.
-        for key in self.bounds:
-            if key.startswith('_'): continue
-            (isd, vals) = self.bounds[key]
-            if isd:
-                ret *= len(vals) / float(len(self.ref_bounds[key][1]))
-            else:
-                rf = self.ref_bounds[key][1]
-                ret *= max(0, (vals[1] - vals[0])) / (rf[1] - rf[0])
-
-        return max(0,ret)
-
-
-
-def rules_to_bounds(rules, ref_bounds):
-    bounds = []
-    for rule in rules:
-        if isinstance(rule, SDRule):
-            bound = RuleBound(ref_bounds, rule=rule)
-        elif isinstance(rule, RuleBound):
-            bound = rule
-        else:
-            raise
-
-        bounds.append(bound)
-    return bounds
-
-def get_ref_bounds(data):
-    bdists = Orange.statistics.basic.Domain(data)
-    contattrs = []
-    ret = {}
-    for idx, attr in enumerate(data.domain):
-        if attr.var_type == Orange.feature.Type.Discrete:
-            isd = True
-            vals = list(attr.values)
-            ret[attr.name] = (isd, vals)
-        else:
-            contattrs.append(attr)
-            ret[attr.name] = (False, [1e10000, -1e10000])
-
-    for row in data:
-        for attr in contattrs:
-            if row[attr].value and row[attr].value != '?':
-                ret[attr.name][1][0] = min(float(row[attr].value), ret[attr.name][1][0])
-                ret[attr.name][1][1] = max(float(row[attr].value), ret[attr.name][1][1])
-    return ret
-
-
-def remove_subsumed_rules(rules):
-    """
-    goes through rules in order of quality and removes rules that are
-    subsumed by higher quality rules
-    @return filtered list of rules
-    """
-    def subsumed(rule, better_rules):
-        for br in better_rules:
-            if rule.isSubsumed(br):
-                return True
-        return False
-
-    rules = sorted(rules,
-                   key=lambda r:(r.quality, r.complexity),
-                   reverse=True) 
-
-    ret = []
-    for idx, rule in enumerate(rules):
-        # does an earlier rule subsume this?
-        if not subsumed(rule, rules[:idx]):
-            ret.append(rule)
-    return ret
+  result = dict(kwargs)
+  result.update({
+    'count': len(rule.examples),
+    'score': rnd(rule.quality),
+    'c_range': map(rnd, rule.c_range),
+    'clauses': clause_parts,
+    'alt_rules': alt_rules
+  })
+  return result
 
 
 def fill_in_rules(rules, table, cols=None, cont_dists=None):

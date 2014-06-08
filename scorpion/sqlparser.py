@@ -24,7 +24,7 @@ __agg2f__ = {'avg' : AvgErrFunc,
              'count' : CountErrFunc,
              'abs' : AbsErrFunc}
 
-def parse_sql(db, q):
+def parse_sql(q):
     return SqlParser()(q)
 
 class SqlParser(object):

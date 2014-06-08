@@ -1,4 +1,6 @@
+import json
 from sqlalchemy import create_engine
+from scorpion.learners.cn2sd.rule import rule_to_json
 
 class Status(object):
   def __init__(self, reqid=None):
@@ -19,11 +21,16 @@ class Status(object):
       pass
 
   def create_table(self):
-    try:
-      self.db.execute("create table requests(id serial)")
-      self.db.execute("create table status(id serial, reqid int, status varchar)")
-    except:
-      pass
+    stmts = [
+      "create table requests(id serial)",
+      "create table status(id serial, reqid int, status varchar)",
+      "create table rules(reqid int, label text, val text)"
+    ]
+    for stmt in stmts:
+      try:
+        self.db.execute(stmt)
+      except:
+        pass
 
   def cleanup(self):
     self.db.execute("delete from status where reqid = %s", self.reqid)
@@ -50,4 +57,34 @@ class Status(object):
     if len(rows):
       return rows[0][0]
     return 'no status yet'
+
+  def update_rules(self, label, rules):
+    q = """update rules set val=%s where reqid=%s and label = %s;
+    insert into rules
+      select %s, %s, %s 
+      where not exists (
+        select 1 from rules where reqid=%s and label = %s
+      );
+    """
+    jsons = []
+    for rule in rules:
+      if isinstance(rule, dict):
+        jsons.append(rule)
+      else:
+        jsons.append(rule_to_json(rule, yalias=label))
+    val = json.dumps(jsons)
+    self.db.execute(q, 
+        val, self.reqid, label, 
+        self.reqid, label, val, 
+        self.reqid, label)
+
+  def get_rules(self):
+    q = "select label, val from rules where reqid = %s"
+    rows = self.db.execute(q, self.reqid).fetchall()
+    if len(rows):
+      ret = [ (str(row[0]), json.loads(row[1])) for row in rows ]
+      return ret
+    return []
+    
+    
 

@@ -61,6 +61,9 @@ class Basic(object):
     self.scorer_cost = 0.
     self.merge_cost = 0.
 
+    self.update_status = self.obj.update_status
+    self.update_rules = self.obj.update_rules
+
     self.set_params(**kwargs)
 
   def __hash__(self):
@@ -113,10 +116,6 @@ class Basic(object):
     attrnames = [attr.name for attr in domain]
     self.cont_dists = dict(zip(attrnames, Orange.statistics.basic.Domain(self.full_table)))
     self.disc_dists = dict(zip(attrnames, Orange.statistics.distribution.Domain(self.full_table)))
-
-  def update_status(self, s):
-    if self.obj:
-      self.obj.update_status(s)
 
   def __call__(self, full_table, bad_tables, good_tables, **kwargs):
     """

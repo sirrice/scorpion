@@ -1,5 +1,6 @@
 import os
 import time
+import json
 import logging
 import sys
 import random
@@ -73,6 +74,22 @@ def instrument(fn):
         return ret
     return w
 
+
+# JSON Encoder
+class ScorpionEncoder(json.JSONEncoder):
+  def default(self, o):
+    if isinstance(o, float):
+      if o == float('inf'):
+        return 1e100
+      elif o == float('-inf'):
+        return -1e100
+
+    if hasattr(o, 'isoformat'):
+      s =  o.isoformat()
+      if not s.endswith("Z"):
+        s += 'Z'
+      return s
+    return super(ScorpionEncoder, self).default(o)
 
 
 
