@@ -454,7 +454,7 @@ class Cluster(object):
   ancestors = property(__ancestors__)
   
   def __str__(self):
-      cr = "%.4f\t%.4f" % tuple(self.c_range)
+      cr = "%.4f-%.4f" % tuple(self.c_range)
       return '%.4f\t%s\t%s' % (self.error, cr, str(self.rule))
       s = '\t'.join(['%s:(%.4f, %.4f)' % (col, bound[0], bound[1]) 
                   for col, bound in zip(self.cols, zip(*self.bbox))])

@@ -182,49 +182,49 @@ class Grouper(object):
         id2vals = {}
 
         for idx, attr in enumerate(self.data.domain):
-            if attr.name not in self.mr.cols:
-                continue
-            if attr.var_type == Orange.feature.Type.Discrete:
-                groups = self.create_discrete_groups(attr, idx, ddists[idx].keys())
-                mapper = {}
-                for idx, group in enumerate(groups):
-                    for val in group:
-                        mapper[val] = idx
-                self.mappers[attr] = mapper
+          if attr.name not in self.mr.cols:
+            continue
+          if attr.var_type == Orange.feature.Type.Discrete:
+            groups = self.create_discrete_groups(attr, idx, ddists[idx].keys())
+            mapper = {}
+            for gidx, group in enumerate(groups):
+                for val in group:
+                    mapper[val] = gidx
+            self.mappers[attr] = mapper
 
-                f = lambda v: int(self.mappers[v.variable].get(v.value, len(groups)))
-                n = len(groups)
-                ranges = groups
+            f = lambda v: int(self.mappers[v.variable].get(v.value, len(groups)))
+            n = len(groups)
+            ranges = groups
+          else:
+            dist = bdists[idx]
+            maxv, minv = dist.max, dist.min
+            if maxv == minv:
+              f = lambda v: 0
+              n = 1
+              ranges = [(minv, maxv)]
             else:
-                dist = bdists[idx]
-                maxv, minv = dist.max, dist.min
-                if maxv == minv:
-                    f = lambda v: 0
-                    n = 1
-                    ranges = [(minv, maxv)]
-                else:
-                    def make_func(minv, block):
-                      def f(v):
-                        return int(math.ceil((v-minv)/block)) 
-                      return f
-                    block = (maxv - minv) / float(self.mr.granularity)
-                    n = self.mr.granularity #+1
-                    f = make_func(minv, block)
-                    ranges = [(maxv - (i+1)*block, maxv - (i)*block) for i in xrange(n-1,-1,-1)]
-                    ranges[0] = [-float('infinity'), ranges[0][1]]
-                    ranges[-1] = [ranges[-1][0], float('infinity')]
-                    print attr, block, minv, maxv
+              def make_func(minv, block):
+                def f(v):
+                  return int(math.ceil((v-minv)/block)) 
+                return f
+              block = (maxv - minv) / float(self.mr.granularity)
+              n = self.mr.granularity #+1
+              f = make_func(minv, block)
+              ranges = [(maxv - (i+1)*block, maxv - (i)*block) for i in xrange(n-1,-1,-1)]
+              ranges[0] = [-float('infinity'), ranges[0][1]]
+              ranges[-1] = [ranges[-1][0], float('infinity')]
+              print attr, block, minv, maxv
 
-            gbfuncs[attr] = f
-            gbids[attr] = n
-            id2vals[attr] = dict(enumerate(ranges))
+          gbfuncs[attr] = f
+          gbids[attr] = n
+          id2vals[attr] = dict(enumerate(ranges))
 
         self.gbfuncs = gbfuncs
         self.gbids = gbids
         self.id2vals = id2vals
 
     def create_discrete_groups(self, attr, pos, vals):
-        return [(val,) for val in vals]
+        return [(val,) for val in sorted(vals)]
         if len(vals) == 1:
             return (vals,)
 
@@ -253,7 +253,7 @@ class Grouper(object):
       """
       ret = []
       counts = []
-      maxinf = -1e1000000000000
+      maxinf = float('-inf')
       iterator = zip(enumerate(err_funcs), all_table_rows)
       for (idx, ef), table_rows in iterator:
         rows = table_rows.get(g, [])
@@ -270,7 +270,7 @@ class Grouper(object):
       return ret, counts, maxinf
 
     def influence_tuple(self, row, ef):
-      if row[self.mr.SCORE_ID].value == -1e10000000000:
+      if row[self.mr.SCORE_ID].value == float('-inf'):
         influence = ef((row,))
         row[self.mr.SCORE_ID] = influence
       return row[self.mr.SCORE_ID].value
@@ -294,7 +294,6 @@ class Grouper(object):
       for table in self.mr.good_tables:
         good_table_rows.append(self.groups_by_attrs(attrs, valid_groups, table))
 
-
       for g in valid_groups:
         # compute the influence_state for each group (cube)
         bds, bcs, maxinf = self._get_infs(bad_table_rows, self.mr.bad_err_funcs, g, True)
@@ -307,75 +306,77 @@ class Grouper(object):
 
 
     def initial_groups(self):
-        for attr, n in self.gbids.items():
-            yield (attr,), ((i,) for i in xrange(n))
+      keys = sorted(self.gbids.keys(), key=lambda a: a.name)
+      for attr in keys:
+        n = self.gbids[attr]
+        yield (attr,), ((i,) for i in xrange(n))
 
 
 
 
     def merge_groups(self, prev_groups):
-        """
-        prev_groups: attributes -> groups
-        attributes are sorted
-        group: attr -> idx
-        """
-        start = time.time()
-        attrs_list = prev_groups.keys()
-        for a_idx, attrs1 in enumerate(attrs_list):
-            sattrs1 = set(attrs1)
-            pgroup1 = [dict(zip(attrs1, g)) for g in prev_groups[attrs1]]
-            for attrs2 in attrs_list[a_idx+1:]:
-                pgroup2 = [dict(zip(attrs2, g)) for g in prev_groups[attrs2]]
+      """
+      prev_groups: attributes -> groups
+      attributes are sorted
+      group: attr -> idx
+      """
+      start = time.time()
+      attrs_list = sorted(prev_groups.keys())
+      for a_idx, attrs1 in enumerate(attrs_list):
+        sattrs1 = set(attrs1)
+        pgroup1 = [dict(zip(attrs1, g)) for g in prev_groups[attrs1]]
+        for attrs2 in attrs_list[a_idx+1:]:
+          pgroup2 = [dict(zip(attrs2, g)) for g in prev_groups[attrs2]]
 
-                sattrs2 = set(attrs2)
-                merged_attrs = tuple(sorted(sattrs1.union(sattrs2)))
-                if len(merged_attrs) != len(sattrs1)+1:
-                    continue
-                intersecting = tuple(sorted(sattrs1.intersection(sattrs2)))
+          sattrs2 = set(attrs2)
+          merged_attrs = tuple(sorted(sattrs1.union(sattrs2)))
+          if len(merged_attrs) != len(sattrs1)+1:
+              continue
+          intersecting = tuple(sorted(sattrs1.intersection(sattrs2)))
 
-                unique1 = tuple(sattrs1.difference(sattrs2))[0]
-                unique2 = tuple(sattrs2.difference(sattrs1))[0]
-                idx1 = merged_attrs.index(unique1)
-                idx2 = merged_attrs.index(unique2)
+          unique1 = tuple(sattrs1.difference(sattrs2))[0]
+          unique2 = tuple(sattrs2.difference(sattrs1))[0]
+          idx1 = merged_attrs.index(unique1)
+          idx2 = merged_attrs.index(unique2)
 
-                diff = time.time() - self.mr.start
-                if diff >= self.mr.max_wait:
-                  _logger.debug("wait %d > %d exceeded" % (diff, self.mr.max_wait))
-                  return
+          diff = time.time() - self.mr.start
+          if diff >= self.mr.max_wait:
+            _logger.debug("wait %d > %d exceeded" % (diff, self.mr.max_wait))
+            return
 
-                yield (merged_attrs, self.fulljoin(intersecting, merged_attrs, idx1, idx2, pgroup1, pgroup2))
+          yield (merged_attrs, self.fulljoin(intersecting, merged_attrs, idx1, idx2, pgroup1, pgroup2))
 
     def fulljoin(self, inter, union, idx1, idx2, groups1, groups2):
-        def make_key(group):
-            ret = [group.get(k, None) for k in union]
-            ret[idx1] = ret[idx2] = None
-            return tuple(ret)
+      def make_key(group):
+        ret = [group.get(k, None) for k in union]
+        ret[idx1] = ret[idx2] = None
+        return tuple(ret)
 
-        matches1 = defaultdict(list)
-        matches2 = defaultdict(list)
-        try:
-            for g1 in groups1:
-                matches1[make_key(g1)].append(g1[union[idx1]])
-            for g2 in groups2:
-                matches2[make_key(g2)].append(g2[union[idx2]])
-        except:
-            pdb.set_trace()
+      matches1 = defaultdict(list)
+      matches2 = defaultdict(list)
+      try:
+        for g1 in groups1:
+            matches1[make_key(g1)].append(g1[union[idx1]])
+        for g2 in groups2:
+            matches2[make_key(g2)].append(g2[union[idx2]])
+      except:
+        pdb.set_trace()
 
-        seen = set()
+      seen = set()
 
-        for key in matches1.keys():
-            if key not in matches2:
-                continue
+      for key in matches1.keys():
+        if key not in matches2:
+          continue
 
-            for v1 in matches1[key]:
-                for v2 in matches2[key]:
-                    newg = list(key)
-                    newg[idx1] = v1
-                    newg[idx2] = v2
-                    newg = tuple(newg)
-                    if newg in seen:
-                        continue
-                    seen.add(newg)
-        return seen
+        for v1 in matches1[key]:
+          for v2 in matches2[key]:
+            newg = list(key)
+            newg[idx1] = v1
+            newg[idx2] = v2
+            newg = tuple(newg)
+            if newg in seen:
+              continue
+            seen.add(newg)
+      return seen
 
              

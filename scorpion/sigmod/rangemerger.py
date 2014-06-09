@@ -72,9 +72,7 @@ class BaseRangeMerger(Merger):
       c.inf_range = [c.inf_func(c.c_range[0]), c.inf_func(c.c_range[1])]
 
   def print_clusters(self, clusters):
-    rules = clusters_to_rules(clusters, self.learner.full_table)
-    rules = ['%.4f-%.4f %s' % (r.c_range[0], r.c_range[1], r) for r in rules]
-    print '\n'.join(rules)
+    print "\n".join(map(str, clusters))
 
   def get_variety_frontier(self, clusters):
     seen = set()
@@ -276,10 +274,10 @@ class BaseRangeMerger(Merger):
         break
 
       cur = cur_bests.pop()
-      if hash(cur) in seen: 
+      if cur.bound_hash in seen: 
         _logger.debug("seen \t%s", str(cur.rule)[:100])
         continue
-      seen.add(hash(cur))
+      seen.add(cur.bound_hash)
       _logger.debug("expand\tsub\t%.3f-%.3f\t%s", cur.c_range[0], cur.c_range[1],  str(cur.rule)[:100])
 
 
@@ -325,7 +323,7 @@ class BaseRangeMerger(Merger):
       for merged in frontier.difference(cur_bests):
         rms.update(merged.parents)
       self.adj_graph.insert(cur_bests)
-      seen.update(rms)
+      seen.update([c.bound_hash for c in rms])
 
       cur_bests = frontier
       cur_bests.difference_update([cur])
@@ -371,7 +369,7 @@ class RangeMerger(BaseRangeMerger):
       bests, _ = self.get_frontier(bests)
       for cand in cands:
         if cand not in bests:
-          seen.add(hash(cand))
+          seen.add(cand.bound_hash)
     else:
       cands = []
       bests = set([cur])
@@ -379,7 +377,7 @@ class RangeMerger(BaseRangeMerger):
         cands.append(cand)
         bests, _ = self.get_frontier(bests.union(set([cand])))
         if cand not in bests:
-          seen.add(hash(cand))
+          seen.add(cand.bound_hash)
           break
       bests = [cur] + cands
     bests = list(bests)
@@ -487,7 +485,7 @@ class RangeMerger2(BaseRangeMerger):
         c.c_range = list(self.c_range)
       tmp.extend(curset)
       curset,_ = self.get_frontier(tmp)
-      seen.update(map(hash, _))
+      seen.update([c.bound_hash for c in _])
 
 
       # update rejection state

@@ -89,11 +89,15 @@ class BDT(Basic):
 
     def nodes_to_clusters(self, nodes, table):
       clusters = []
+      rules = []
       for node in nodes:
         node.rule.quality = node.influence
-        rules = [node.rule]
-        fill_in_rules(rules, table, cols=self.cols)
-        cluster = Cluster.from_rule(rules[0], self.cols)
+        rule = node.rule.simplify(node.rule(table))#, self.cont_dists, self.disc_dists)
+        rules.append(rule)
+
+      fill_in_rules(rules, table, cols=self.cols)
+      for rule in rules:
+        cluster = Cluster.from_rule(rule, self.cols)
         cluster.states = node.states
         cluster.cards = node.cards
         clusters.append(cluster)
@@ -178,7 +182,8 @@ class BDT(Basic):
       self.update_status("computing frontier")
       _logger.debug("compute initial frontier")
       frontier,_ = Frontier(self.c_range, 0.001)(clusters)
-      ret = []
+
+      ret = list(frontier)
       _logger.debug("get nonleaves containing frontier")
       for nonleaf in nonleaves:
         for c in frontier:
@@ -189,7 +194,6 @@ class BDT(Basic):
 
       self.update_status("expanding frontier (%d rules)" % len(ret))
       _logger.debug("second merger pass")
-      ret.extend(clusters)
       return ret
 
 
@@ -322,8 +326,18 @@ class BDT(Basic):
         bpartitioner = BDTTablesPartitioner(**params)
         bpartitioner(bad_tables, full_table)
         self.cost_partition_bad = time.time() - start
-        
         tree = bpartitioner.root.clone()
+
+        clusters = self.nodes_to_clusters(tree.leaves, full_table)
+        for c in clusters:
+          self.influence_cluster(c)
+        _logger.debug( "==== Best Leaf Nodes (%d total) ====" , len(clusters))
+        _logger.debug( '\n'.join(map(str, sorted(clusters, reverse=True)[:10])))
+
+        return clusters, []
+
+
+        
         for hnode in tree.nodes:
           hnode.frombad = True
         _logger.debug('\npartitioning bad tables done\n')
@@ -362,12 +376,15 @@ class BDT(Basic):
         self.stats['intersect_partitions'] = [time.time()-start, 1]
         self.cost_split = time.time() - start
 
+
+
         # NOTE: if good partitioner starts with tree from bad partitioner then
         #       no need to intersect their results
         #clusters = self.intersect(bclusters, hclusters)
         clusters = self.nodes_to_clusters(tree.leaves, full_table)
         nonleaf_clusters = self.nodes_to_clusters(nonleaves, full_table)
         #clusters.extend(popular_clusters)
+
 
         if False:
           start = time.time()

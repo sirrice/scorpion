@@ -25,8 +25,13 @@ _logger = get_logger()
 class StreamRangeMerger(RangeMerger2):
   def __init__(self, *args, **kwargs):
     super(StreamRangeMerger, self).__init__(*args, **kwargs)
+    self.valid_cluster_f = kwargs.get('valid_cluster_f', lambda c: True)
+
+    # idx -> clusters to expand  -- different than clusters on frontier!!
+    self.tasks = defaultdict(list)
 
     # stores the frontier after each iteration
+    self.added = set()
     self.seen = set()
     self.frontiers = []
     self.adj_graph = None
@@ -37,8 +42,11 @@ class StreamRangeMerger(RangeMerger2):
     return self.frontiers[version]
 
   def setup_stats(self, clusters):
-    clusters = filter(lambda c: c.bound_hash not in self.seen, clusters)
-    self.seen.update([c.bound_hash for c in clusters])
+    all_inf = lambda l: all([abs(v) == float('inf') for v in l])
+    clusters = filter(lambda c: c.bound_hash not in self.added, clusters)
+    clusters = filter(lambda c: not all_inf(c.inf_state[0]), clusters)
+    clusters = filter(lambda c: not all_inf(c.inf_state[2]), clusters)
+    self.added.update([c.bound_hash for c in clusters])
 
     super(StreamRangeMerger, self).setup_stats(clusters)
 
@@ -70,40 +78,66 @@ class StreamRangeMerger(RangeMerger2):
     return self.get_frontier(clusters)[0]
 
 
+  def add_clusters(self, clusters, idx=0):
+    if not clusters: return
 
-  def __call__(self, clusters):
+    print "add_clusters"
+    self.print_clusters(clusters)
+    self.setup_stats(clusters)
+    base_frontier = self.get_frontier_obj(idx)
+    clusters, _ = base_frontier.update(clusters)
+    print "base_frontier"
+    self.print_clusters(clusters)
+
+    # clear out current tasks
+    self.tasks[idx] = filter(base_frontier.__contains__, self.tasks[idx])
+    self.tasks[idx].extend(clusters)
+
+    if idx == 0:
+      # remove non-frontier-based expansions from future expansion
+      for tidx in self.tasks.keys():
+        if tidx == 0: continue
+        checker = lambda c: any(map(base_frontier.__contains__, c.ancestors))
+        self.tasks[tidx] = filter(checker, self.tasks[tidx])
+
+  @property
+  def ntasks(self):
+    if not self.tasks: return 0
+    return sum(map(len, self.tasks.values()))
+
+  def has_next_task(self):
+    if not self.tasks: return False
+    return self.ntasks > 0
+
+  def next_tasks(self, n=1):
+    ret = []
+    for idx in reversed(self.tasks.keys()):
+      tasks = self.tasks[idx]
+      while len(ret) < n and tasks:
+        ret.append((idx, tasks.pop()))
+    return ret
+
+
+  def __call__(self, clusters=[], n=2):
     """
     Return the best clusters seen so far across _all_ calls
     """
-    self.setup_stats(clusters)
-    self.learner.update_status("merger running on %d rules" % len(clusters))
+    self.add_clusters(clusters)
 
-    idx = 0
-    seen = set()
-    ret = set()
-    clusters, _ = self.get_frontier_obj(idx).update(clusters)
+    print "merger has %d tasks left" % self.ntasks
+    tasks = self.next_tasks(n)
+    for idx, cluster in tasks:
+      if not (idx == 0 or self.valid_cluster_f(cluster)):
+        print "merger\tbelow thresh skipping\t %s" % cluster
+        continue
 
-    while clusters:
-      self.print_clusters(clusters)
-      
-      self.learner.update_status("expanding %d rules" % len(clusters))
-      expanded, rms = self.expand_frontier(clusters, seen, version=idx)
-      self.print_clusters(expanded)
+      expanded, rms = self.expand_frontier([cluster], self.seen, version=idx)
 
       frontier, rms2 = self.get_frontier_obj(idx+1).update(expanded)
-      self.learner.update_status("got expanded %d rules.  %d better than existing.  %d improved over clusters" % (
-        len(expanded), len(frontier), len(frontier.difference(clusters))))
-      print "forntier %d has %d vals" % (idx+1, len(self.get_frontier_obj(idx+1).frontier))
+      improved_clusters = frontier.difference(set([cluster]))
+      if not improved_clusters:
+        continue
 
-      if not frontier.difference(clusters):
-        break
-      
-      #self.adj_graph.remove(rms, version=idx)
       self.adj_graph.insert(frontier, version=idx+1)
-      clusters = frontier.difference(clusters)
-      idx += 1
-
-    self.learner.update_status("merger ran for %d iterations" % idx)
-    ret = list(self.best_so_far())
-    return ret
-
+      self.add_clusters(improved_clusters, idx+1)
+ 

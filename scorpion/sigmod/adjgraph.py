@@ -4,6 +4,7 @@ import random
 import numpy as np
 import sys
 import time
+import Orange
 sys.path.extend(['.', '..'])
 
 from itertools import chain, repeat
@@ -30,7 +31,7 @@ class FeatureMapper(object):
     self.cont_dists = cont_dists
     self.ranges = { col: cont_dists[col].max - cont_dists[col].min for col in cont_dists.keys() if cont_dists[col] }
     for attr in domain:
-      if 'Contin' not in str(attr):
+      if attr.var_type == Orange.feature.Type.Discrete:
         self.feature_mappers[attr.name] = self.get_feature_mapper(attr)
 
   def get_feature_mapper(self, attr):
@@ -269,8 +270,11 @@ class AdjacencyVersion(object):
   def neighbors(self, cluster):
     ret = None
     for name, vals in cluster.discretes.iteritems():
+      if name not in self.disc_idxs:
+        return []
       vect = self.feature_mapper(cluster, name)
-      dists, idxs = self.disc_idxs[name].radius_neighbors(vect, radius=self.radius)
+      index = self.disc_idxs[name]
+      dists, idxs = index.radius_neighbors(vect, radius=self.radius)
       idxs = set(idxs[0].tolist())
 
       if ret is None:

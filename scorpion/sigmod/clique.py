@@ -7,7 +7,7 @@ import orange
 import heapq
 sys.path.extend(['.', '..'])
 
-from itertools import chain
+from itertools import chain, ifilter
 
 
 from ..learners.cn2sd.rule import fill_in_rules
@@ -150,11 +150,14 @@ class MR(Basic):
         nseen += 1
         if self.stop:
             break
+        print "clique\t", str(ro)
+
         if self.top_k(ro):
           nadded += 1
 
         if nadded % 25 == 0 and nadded > 0:
-          to_yield = map(self.blah_to_cluster, set(self.best).difference(seen))
+          newbests = ifilter(lambda c: c not in seen, self.best)
+          to_yield = map(self.blah_to_cluster, newbests)
           seen.update(self.best)
           all_bests.update(to_yield)
           yield to_yield
@@ -167,7 +170,8 @@ class MR(Basic):
             nnewgroups += 1
         ro.rule.__examples__ = None
 
-      to_yield = map(self.blah_to_cluster, set(self.best).difference(seen))
+      newbests = ifilter(lambda c: c not in seen, self.best)
+      to_yield = map(self.blah_to_cluster, newbests)
       seen.update(self.best)
       all_bests.update(to_yield)
       yield to_yield

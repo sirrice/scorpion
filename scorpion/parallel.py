@@ -144,46 +144,34 @@ def serial_hybrid(obj, aggerr, **kwargs):
   learner.setup_tables(all_full_table, bad_tables, good_tables)
 
 
-  if True:
+  if kwargs.get('parallel', False):
     clusters = []
     par2chq = Queue()
     ch2parq = Queue()
-    args = (learner, aggerr, params, (par2chq, ch2parq))
+    args = (learner, aggerr, params, _logger, (par2chq, ch2parq))
     proc = Process(target=merger_process_f, args=args)
     proc.start()
 
     # loop
     for batch in learner(all_full_table, bad_tables, good_tables):
+      if not batch: continue
       batch_dicts = [c.to_dict() for c in batch]
-      print "send to child proc %d rules" % len(batch_dicts)
+      _logger.debug("main\tsend to child proc %d rules" % len(batch_dicts))
       par2chq.put(batch_dicts)
-      print "done"
-      #par2chq.put(batch)
-    print "send to child proc DONE"
+    _logger.debug("main\tsend to child proc DONE")
     par2chq.put('done')
     par2chq.close()
 
-    while True:
-      try:
-        batch = ch2parq.get()
-        if batch == 'done':
-          break
-        print "got %d from merger proc" % len(batch)
-        batch = [Cluster.from_dict(d) for d in batch]
-        clusters.extend(batch)
-      except IOError:
-        print "got io error"
-        continue
-      except EOFError:
-        break
+    # wait for results from merger to come back
+    batch = ch2parq.get()
+    batch = [Cluster.from_dict(d) for d in batch]
+    clusters.extend(batch)
     ch2parq.close()
     proc.join()
 
     for c in clusters:
       c.to_rule(full_table,learner.cont_dists, learner.disc_dists)
       c.inf_func = learner.create_inf_func(c)
-
-    clusters, _ = Frontier(learner.c_range)(clusters)
 
   else:
     mparams = dict(params)
@@ -197,10 +185,21 @@ def serial_hybrid(obj, aggerr, **kwargs):
     start = time.time()
     clusters = []
     for batch in learner(all_full_table, bad_tables, good_tables):
-      clusters.extend(merger(batch))
+      merger.add_clusters(batch)
+      merger()
+      #clusters.extend(merger(batch))
+    while merger.has_next_task():
+      merger()
+    clusters = list(merger.best_so_far())
     costs['rules_get'] = time.time() - start
 
   clusters = list(clusters)
+
+  print "found clusters"
+  for c in clusters:
+    print "\t", str(c)
+
+
 
   obj.update_status('clustering results')
   start = time.time()
@@ -217,9 +216,9 @@ def serial_hybrid(obj, aggerr, **kwargs):
 
 
 
-  print "found rules"
-  for rule in rules:
-    print "%.5f\t%s" % (rule.quality, rule)
+  print "grouped rules"
+  for rule in rules: 
+    print '\t', str(rule)
 
   print "=== Costs ==="
   for key, cost in costs.iteritems():
@@ -228,41 +227,36 @@ def serial_hybrid(obj, aggerr, **kwargs):
   return full_table, rules
 
 
-def merger_process_f(learner, aggerr, params, (in_conn, out_conn)):
+def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   # create and launch merger
+  THRESHOLD = 0.01
+  threshold = THRESHOLD * np.median([ef.value for ef in learner.bad_err_funcs])
+  valid_cluster_f = lambda c: c.inf_state[0] and max(c.inf_state[0]) > threshold
+
   params = dict(params)
   params.update({
     'learner_hash': hash(learner),
     'learner' : learner,
-    'partitions_complete': False
+    'partitions_complete': False,
+    'valid_cluster_f': valid_cluster_f #lambda c: True
   })
   merger = StreamRangeMerger(**params)
-  print "merger process done with setup!"
 
   # setup a merger
+  merged = []
+  dicts = []
   done = False
-  while not done:
-    try:
-      dicts = in_conn.get()
-      if dicts == 'done': 
-        done = True
-        break
+  while not done or merger.has_next_task():
+    if not done:
+      try:
+        dicts = in_conn.get(False)
+      except Empty:
+        dicts = []
+        pass
 
-      # empty the queue
-      while True:
-        try:
-          data = in_conn.get(False)
-        except Empty:
-          break
-        if data == 'done':
-          done = True
-          break
-        dicts.extend(data)
-
-    except EOFError:
-      break
-    except IOError:
-      continue
+    if dicts == 'done': 
+      done = True
+      dicts = []
 
     try:
       clusters = []
@@ -274,9 +268,20 @@ def merger_process_f(learner, aggerr, params, (in_conn, out_conn)):
         c.inf_func = learner.create_inf_func(c)
         clusters.append(c)
 
-      merged = merger(clusters)
-      rules = group_clusters(merged, learner)
-      learner.update_rules(aggerr.agg.shortname, rules)
+      if clusters:
+        _logger.debug("merger\tadd_clusters %d" % len(clusters))
+        merger.add_clusters(clusters)
+
+      if merger.has_next_task():
+        _logger.debug("merger\tprocess tasks")
+        merger()
+        merged = list(merger.best_so_far())
+        rules = group_clusters(merged, learner)
+        learner.update_rules(aggerr.agg.shortname, rules)
+        _logger.debug("merger\tupdated %d rules" % len(rules))
+      else:
+        time.sleep(0.5)
+
     except Exception as e:
       print "problem in merger process"
       print e
@@ -284,10 +289,13 @@ def merger_process_f(learner, aggerr, params, (in_conn, out_conn)):
       traceback.print_exc()
       merged = []
 
-    print "send merged back %d" % len(merged)
-    out_conn.put([c.to_dict() for c in merged])
+  _logger.debug("merger\texited loop")
 
-  out_conn.put('done')
+
+  if not merged:
+    merged = merger.best_so_far()
+  _logger.debug("merger\tsending %d results back" % len(merged))
+  out_conn.put([c.to_dict() for c in merged])
   in_conn.close()
   out_conn.close()
   print "child DONE"
@@ -322,6 +330,9 @@ def group_clusters(clusters, learner):
 
   rules = filter(bool, map(group_to_rule, groups))
   rules.sort(key=lambda r: r.c_range[0])
+  if not all(map(validf, rules)):
+    for r in rules: print r.c_range
+    pdb.set_trace()
   return rules
 
 def get_hierarchies(clusters):
@@ -343,10 +354,13 @@ def filter_useless_clusters(clusters, learner):
   then throw it away
   """
   THRESHOLD = 0.01
-  mean_val = np.mean([ef.value for ef in learner.bad_err_funcs])
+  mean_val = np.median([ef.value for ef in learner.bad_err_funcs])
   threshold = THRESHOLD * mean_val
 
   f = lambda c: c.inf_state[0] and max(c.inf_state[0]) > threshold
+  for c in clusters:
+    if not f(c):
+      print "useless cluster: %s" % c
   return filter(f, clusters)
 
 def merge_clauses(clusters):
@@ -355,15 +369,28 @@ def merge_clauses(clusters):
   into a single cluster
   """
   if len(clusters) == 0: return None
-  if len(clusters) == 1: return clusters[0]
+  if len(clusters) == 1: 
+    clusters[0].rule.c_range = clusters[0].c_range
+    return clusters[0]
+
   conds = {}
   for c in clusters:
     for cond in c.rule.filter.conditions:
       key = c.rule.condToString(cond)
       conds[key] = cond
+
   conds = conds.values()
-  rule = SDRule(clusters[0].rule.data, None, conds, None)
-  return Cluster.from_rule(rule, clusters[0].cols)
+  mainc = clusters[0]
+  rule = SDRule(mainc.rule.data, None, conds, None)
+  rule.c_range = list(mainc.c_range)
+  rule.quality = mainc.error
+  c = Cluster.from_rule(rule, mainc.cols)
+  c.c_range = list(mainc.c_range)
+  c.inf_state = map(tuple, mainc.inf_state)
+  c.inf_func = mainc.inf_func
+  c.error = mainc.error
+  return c
+
 
 
 def group_to_rule(clusters):

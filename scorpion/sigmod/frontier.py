@@ -224,6 +224,12 @@ class ContinuousFrontier(Frontier):
     self.frontier = set()
     self.seen = set()
 
+  def __contains__(self, c):
+    if c is None: return False
+    if hasattr(c, 'bound_hash'):
+      return c.bound_hash in self.seen
+    return False
+
   @instrument
   def intersections_with_frontier(self, cluster):
     for c in self.frontier:
@@ -311,6 +317,8 @@ class Intersection(object):
     """
     if c1 is None: return None
     if c2 is None: return None
+    if abs(c1.error) == float('inf'): return None
+    if abs(c2.error) == float('inf'): return None
 
 
     bound = list(self.bound)
@@ -329,8 +337,11 @@ class Intersection(object):
     start = time.time()
     c1s = c1.inf_func(xs)
     c2s = c2.inf_func(xs)
-    nbools = (c1s < c2s).sum()
-    nequals = (c1s == c2s).sum()
+    try:
+      nbools = (c1s < c2s).sum()
+      nequals = (c1s == c2s).sum()
+    except:
+      return None
     cost = time.time() - start
     self.stats['aprox_check'][0] += cost
     self.stats['aprox_check'][1] += 1

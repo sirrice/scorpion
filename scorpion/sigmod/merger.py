@@ -185,7 +185,7 @@ class Merger(object):
       return merged
 
     @instrument
-    def dim_merge(self, cluster, dim, dec=None, inc=None, skip=None):
+    def dim_merge(self, cluster, dim, dec=None, inc=None, seen=None):
       bbox = [list(cluster.bbox[0]), list(cluster.bbox[1])]
       merged = cluster.clone()
       if dec is not None:
@@ -201,28 +201,33 @@ class Merger(object):
       if dec is None and inc is None:
         return None
       merged.bbox = (tuple(bbox[0]), tuple(bbox[1]))
-      if skip and hash(merged) in skip: 
+      if seen and merged.bound_hash in seen: 
         return None
       merged.rule = None
       merged.rule = merged.to_rule(self.learner.full_table)
       merged.error = self.influence(merged)
       merged.parents = [cluster]
+      if abs(merged.error) == float('inf'):
+        return None
       return merged
 
     @instrument
-    def disc_merge(self, cluster, dim, vals, skip=None):
+    def disc_merge(self, cluster, dim, vals, seen=None):
       merged = cluster.clone()
       vals = set(vals)
       vals.update(merged.discretes.get(dim, ()))
       if len(merged.discretes[dim]) == len(vals):
         return None
       merged.discretes[dim] = vals
-      if skip and hash(merged) in skip: 
+      if seen and merged.bound_hash in seen: 
         return None
       merged.rule = None
       merged.rule = merged.to_rule(self.learner.full_table)
       merged.error = self.influence(merged)
       merged.parents = [cluster]
+
+      if abs(merged.error) == float('inf'):
+        return None
       return merged
 
     def dims_to_expand(self, cluster, seen=None, version=None):
@@ -240,7 +245,7 @@ class Merger(object):
       """
       def check(n):
         return not(
-          (seen and hash(n) in seen) or 
+          (seen and n.bound_hash in seen) or 
           (n==cluster) or 
           cluster.same(n, epsilon=0.01) or 
           cluster.contains(n)
@@ -522,7 +527,7 @@ class Merger(object):
 
           for cluster in mergable_clusters:
             if (cluster in merged_clusters or 
-                cluster in new_clusters or cluster in seen):
+                cluster in new_clusters or cluster.bound_hash in seen):
                 continue
 
             canskip = False
@@ -538,7 +543,7 @@ class Merger(object):
 
             merged, rms = self.expand(cluster, clusters) 
             if not merged or merged == cluster or len(filter(lambda c: c.contains(merged), cur_clusters)):
-              seen.add(cluster)
+              seen.add(cluster.bound_hash)
               continue
             if not valid_number(merged.error):
               continue
@@ -547,8 +552,8 @@ class Merger(object):
                             merged.parents[0].error,
                             merged.parents[0].error,
                             merged.error)
-            seen.update(merged.parents)
-            seen.update(rms)
+            seen.update([c.bound_hash for c in merged.parents])
+            seen.update([c.bound_hash for c in rms])
 
 
             if merged not in cur_clusters:
