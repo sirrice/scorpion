@@ -7,6 +7,8 @@ import orange
 import heapq
 sys.path.extend(['.', '..'])
 
+from multiprocessing import Process, Queue, Pool, Pipe
+from Queue import Empty
 from collections import deque
 from itertools import chain
 from rtree.index import Index as RTree
@@ -301,117 +303,212 @@ class BDT(Basic):
 
     @instrument
     def get_partitions(self, full_table, bad_tables, good_tables, **kwargs):
-        clusters, nonleaf_clusters = self.load_from_cache()
-        if clusters:
-          return clusters, nonleaf_clusters
+      clusters, nonleaf_clusters = self.load_from_cache()
+      if clusters:
+        yield clusters
+        return
+        #return clusters, nonleaf_clusters
+
+      max_wait = self.params.get('max_wait', kwargs.get('max_wait', None))
+      bad_max_wait = good_max_wait = None
+      if max_wait:
+        bad_max_wait = max_wait * 2. / 3.
+        good_max_wait = max_wait / 3.
 
 
-        # 
-        # Setup and run partitioner for bad outputs
-        #
-        self.update_status("partitioning bad examples")
-        params = dict(self.params)
-        params.update(kwargs)
-        params['SCORE_ID'] = self.SCORE_ID
-        params['err_funcs'] = self.bad_err_funcs
-        max_wait = params.get('max_wait', None)
-        bad_max_wait = good_max_wait = None
-        if max_wait:
-          bad_max_wait = max_wait * 2. / 3.
-          good_max_wait = max_wait / 3.
+      bad_params = dict(self.params)
+      bad_params.update(kwargs)
+      bad_params.update({
+        'SCORE_ID': self.SCORE_ID,
+        'err_funcs': self.bad_err_funcs,
+        'max_wait': bad_max_wait
+      })
+
+      #partitioner = BDTTablesPartitioner(**bad_params)
+      #partitioner.setup_tables(bad_tables, full_table)
+      #gen = partitioner()
+      #for n in gen: 
+      #  yield self.nodes_to_clusters([n], full_table)
+      #return
 
 
-        start = time.time()
-        params['max_wait'] = bad_max_wait
-        bpartitioner = BDTTablesPartitioner(**params)
-        bpartitioner(bad_tables, full_table)
-        self.cost_partition_bad = time.time() - start
-        tree = bpartitioner.root.clone()
+      good_params = dict(self.params)
+      good_params.update(kwargs)
+      good_params.update({
+        'SCORE_ID': self.SCORE_ID,
+        'err_funcs': self.good_err_funcs,
+        'max_wait': good_max_wait
+      })
 
-        clusters = self.nodes_to_clusters(tree.leaves, full_table)
-        for c in clusters:
-          self.influence_cluster(c)
-        _logger.debug( "==== Best Leaf Nodes (%d total) ====" , len(clusters))
-        _logger.debug( '\n'.join(map(str, sorted(clusters, reverse=True)[:10])))
 
-        return clusters, []
+      bad_p2cq = Queue()
+      bad_c2pq = Queue()
+      good_p2cq = Queue()
+      good_c2pq = Queue()
+      bad_args = ('bad', bad_params, bad_tables, full_table, (bad_p2cq, bad_c2pq))
+      good_args = ('good', good_params, good_tables, full_table, (good_p2cq, good_c2pq))
 
+      bad_proc = Process(target=partition_f, args=bad_args)
+      good_proc = Process(target=partition_f, args=good_args)
+      bad_proc.start()
+      good_proc.start()
+
+      bdone = gdone = False
+      while not bdone or not gdone:
+        bnodes = []
+        gnodes = []
+        bound = None
+        if not bdone:
+          try:
+            data = bad_c2pq.get(False)
+            if data == 'done':
+              bdone = True
+            else:
+              (bnodes, bound) = data
+          except Empty:
+            bnodes = []
+
+        if not gdone:
+          try:
+            data = good_c2pq.get(False)
+            if data == 'done':
+              gdone = True
+            else:
+              gnodes = data[0]
+          except Empty:
+            gnodes = []
 
         
-        for hnode in tree.nodes:
-          hnode.frombad = True
-        _logger.debug('\npartitioning bad tables done\n')
+        if bound and not gdone:
+          good_p2cq.put(bound)
 
-        start = time.time()
+        if bnodes:
+          print "bdt\tgot %s" % len(bnodes)
+          rules = [SDRule.from_json(d, full_table) for d in bnodes]
+          fill_in_rules(rules, full_table, cols=self.cols)
+          clusters = [Cluster.from_rule(rule, self.cols) for rule in rules]
+          yield clusters
 
-        # 
-        # Setup and run partitioner for good outputs
-        #
-        self.update_status("partitioning good examples")
-        inf_bound = [inf, -inf]
-        for ib in bpartitioner.inf_bounds:
-          inf_bound = r_union(ib, inf_bound)
-        inf_bounds = [list(inf_bound) for t in good_tables]
-        print 'partitioner inf_bound: %.4f - %.4f' % tuple(inf_bound)
+      bad_p2cq.close()
+      good_c2pq.close()
+      bad_c2pq.close()
+      good_c2pq.close()
+      bad_proc.join()
+      good_proc.join()
 
-        params['err_funcs'] = self.good_err_funcs
-        params['max_wait'] = good_max_wait
-        hpartitioner = BDTTablesPartitioner(**params)
-        hpartitioner.inf_bounds = inf_bounds
-        hpartitioner(good_tables, full_table, root=tree)
-
-        self.stats['partition_good'] = [time.time()-start, 1]
-        self.cost_partition_good = time.time() - start
-
-
-        leaves = list(tree.leaves)
-        nonleaves = list(tree.nonleaves)
-        _logger.debug( "==== Best Leaf Nodes (%d total) ====" , len(leaves))
-        _logger.debug( '\n'.join(map(str, sorted(leaves, key=lambda n: n.influence)[:10])))
-
-
-        self.update_status("reconciling %d partitions" % (len(nonleaves) + len(leaves)))
-        start = time.time()
-        #popular_clusters = self.nodes_to_popular_clusters(nonleaves, full_table)
-        self.stats['intersect_partitions'] = [time.time()-start, 1]
-        self.cost_split = time.time() - start
+      return
 
 
 
-        # NOTE: if good partitioner starts with tree from bad partitioner then
-        #       no need to intersect their results
-        #clusters = self.intersect(bclusters, hclusters)
-        clusters = self.nodes_to_clusters(tree.leaves, full_table)
-        nonleaf_clusters = self.nodes_to_clusters(nonleaves, full_table)
-        #clusters.extend(popular_clusters)
-
-
-        if False:
-          start = time.time()
-          for c in chain(clusters, nonleaf_clusters):
-            if not c.inf_state:
-              c.error = self.influence_cluster(c)
-          self.stats['init_cluster_errors'] = [time.time()-start, 1]
-
-        if self.DEBUG:
-          renderer = ClusterRenderer('/tmp/bdt.pdf')
-          renderer.plot_clusters(clusters)
-          renderer.new_page()
-          renderer.plot_clusters(nonleaf_clusters)
-
-          tuples = [map(float,[row['a_0'], row['a_1'], row['v']]) for row in self.bad_tables[0]]
-          renderer.plot_tuples(tuples)
-          renderer.close()
 
 
 
-        self.cache_results(clusters, nonleaf_clusters)
+      ## 
+      ## Setup and run partitioner for bad outputs
+      ##
+      #self.update_status("partitioning bad examples")
+      #params = dict(self.params)
+      #params.update(kwargs)
+      #params['SCORE_ID'] = self.SCORE_ID
+      #params['err_funcs'] = self.bad_err_funcs
+      #max_wait = params.get('max_wait', None)
+      #bad_max_wait = good_max_wait = None
+      #if max_wait:
+      #  bad_max_wait = max_wait * 2. / 3.
+      #  good_max_wait = max_wait / 3.
 
-        self.merge_stats(bpartitioner.stats, 'bdtp_bad_')
-        self.merge_stats(hpartitioner.stats, 'bdtp_good_')
+
+      #start = time.time()
+      #params['max_wait'] = bad_max_wait
+      #bpartitioner = BDTTablesPartitioner(**params)
+      #bpartitioner(bad_tables, full_table)
+      #self.cost_partition_bad = time.time() - start
+      #tree = bpartitioner.root.clone()
+
+      #clusters = self.nodes_to_clusters(tree.leaves, full_table)
+      #for c in clusters:
+      #  self.influence_cluster(c)
+      #_logger.debug( "==== Best Leaf Nodes (%d total) ====" , len(clusters))
+      #_logger.debug( '\n'.join(map(str, sorted(clusters, reverse=True)[:10])))
+
+      #return clusters, []
 
 
-        return clusters, nonleaf_clusters
+      #
+      #for hnode in tree.nodes:
+      #  hnode.frombad = True
+      #_logger.debug('\npartitioning bad tables done\n')
+
+      #start = time.time()
+
+      ## 
+      ## Setup and run partitioner for good outputs
+      ##
+      #self.update_status("partitioning good examples")
+      #inf_bound = [inf, -inf]
+      #for ib in bpartitioner.inf_bounds:
+      #  inf_bound = r_union(ib, inf_bound)
+      #inf_bounds = [list(inf_bound) for t in good_tables]
+      #print 'partitioner inf_bound: %.4f - %.4f' % tuple(inf_bound)
+
+      #params['err_funcs'] = self.good_err_funcs
+      #params['max_wait'] = good_max_wait
+      #hpartitioner = BDTTablesPartitioner(**params)
+      #hpartitioner.inf_bounds = inf_bounds
+      #hpartitioner(good_tables, full_table, root=tree)
+
+      #self.stats['partition_good'] = [time.time()-start, 1]
+      #self.cost_partition_good = time.time() - start
+
+
+      #leaves = list(tree.leaves)
+      #nonleaves = list(tree.nonleaves)
+      #_logger.debug( "==== Best Leaf Nodes (%d total) ====" , len(leaves))
+      #_logger.debug( '\n'.join(map(str, sorted(leaves, key=lambda n: n.influence)[:10])))
+
+
+      #self.update_status("reconciling %d partitions" % (len(nonleaves) + len(leaves)))
+      #start = time.time()
+      ##popular_clusters = self.nodes_to_popular_clusters(nonleaves, full_table)
+      #self.stats['intersect_partitions'] = [time.time()-start, 1]
+      #self.cost_split = time.time() - start
+
+
+
+      ## NOTE: if good partitioner starts with tree from bad partitioner then
+      ##       no need to intersect their results
+      ##clusters = self.intersect(bclusters, hclusters)
+      #clusters = self.nodes_to_clusters(tree.leaves, full_table)
+      #nonleaf_clusters = self.nodes_to_clusters(nonleaves, full_table)
+      ##clusters.extend(popular_clusters)
+
+
+      #if False:
+      #  start = time.time()
+      #  for c in chain(clusters, nonleaf_clusters):
+      #    if not c.inf_state:
+      #      c.error = self.influence_cluster(c)
+      #  self.stats['init_cluster_errors'] = [time.time()-start, 1]
+
+      #if self.DEBUG:
+      #  renderer = ClusterRenderer('/tmp/bdt.pdf')
+      #  renderer.plot_clusters(clusters)
+      #  renderer.new_page()
+      #  renderer.plot_clusters(nonleaf_clusters)
+
+      #  tuples = [map(float,[row['a_0'], row['a_1'], row['v']]) for row in self.bad_tables[0]]
+      #  renderer.plot_tuples(tuples)
+      #  renderer.close()
+
+
+
+      #self.cache_results(clusters, nonleaf_clusters)
+
+      #self.merge_stats(bpartitioner.stats, 'bdtp_bad_')
+      #self.merge_stats(hpartitioner.stats, 'bdtp_good_')
+
+
+      #return clusters, nonleaf_clusters
 
 
 
@@ -422,29 +519,33 @@ class BDT(Basic):
         """
         self.setup_tables(full_table, bad_tables, good_tables, **kwargs)
 
-        clusters, nomerge_clusters = self.get_partitions(full_table, bad_tables, good_tables, **kwargs)
-        self.all_clusters = self.pick_clusters(clusters, nomerge_clusters)
-        return [self.all_clusters]
+        for clusters in self.get_partitions(full_table, bad_tables, good_tables, **kwargs):
+          yield clusters
+        return
+
+        #clusters, nomerge_clusters = self.get_partitions(full_table, bad_tables, good_tables, **kwargs)
+        #self.all_clusters = self.pick_clusters(clusters, nomerge_clusters)
+        #return [self.all_clusters]
 
 
-        _logger.debug('merging')
-        final_clusters = self.merge(clusters, nomerge_clusters)        
-        #final_clusters.extend(nomerge_clusters)
+        #_logger.debug('merging')
+        #final_clusters = self.merge(clusters, nomerge_clusters)        
+        ##final_clusters.extend(nomerge_clusters)
 
-        self.final_clusters = final_clusters
+        #self.final_clusters = final_clusters
 
 
-        self.costs.update({
-          'cost_partition_bad' : self.cost_partition_bad,
-          'cost_partition_good' : self.cost_partition_good,
-          'cost_split' : self.cost_split
-        })
-        
-        _logger.debug("=== Costs ===")
-        for key, stat in sorted(self.stats.items(), key=lambda p: p[1][0]):
-          _logger.debug("%.4f\t%d\t%s", stat[0], stat[1], key)
+        #self.costs.update({
+        #  'cost_partition_bad' : self.cost_partition_bad,
+        #  'cost_partition_good' : self.cost_partition_good,
+        #  'cost_split' : self.cost_split
+        #})
+        #
+        #_logger.debug("=== Costs ===")
+        #for key, stat in sorted(self.stats.items(), key=lambda p: p[1][0]):
+        #  _logger.debug("%.4f\t%d\t%s", stat[0], stat[1], key)
 
-        return self.final_clusters
+        #return self.final_clusters
 
 
 

@@ -74,20 +74,24 @@ class StreamRangeMerger(RangeMerger2):
     clusters = set()
     for frontier in self.frontiers:
       clusters.update(frontier.frontier)
-    print "best so far pre-get_frontier %d" % len(clusters)
+    print "merger\tbest so far %d" % len(clusters)
     return self.get_frontier(clusters)[0]
 
 
   def add_clusters(self, clusters, idx=0):
     if not clusters: return
 
-    print "add_clusters"
-    self.print_clusters(clusters)
+    if self.DEBUG:
+      print "add_clusters"
+      self.print_clusters(clusters)
+
     self.setup_stats(clusters)
     base_frontier = self.get_frontier_obj(idx)
     clusters, _ = base_frontier.update(clusters)
-    print "base_frontier"
-    self.print_clusters(clusters)
+
+    if self.DEBUG:
+      print "base_frontier"
+      self.print_clusters(clusters)
 
     # clear out current tasks
     self.tasks[idx] = filter(base_frontier.__contains__, self.tasks[idx])
@@ -124,7 +128,7 @@ class StreamRangeMerger(RangeMerger2):
     """
     self.add_clusters(clusters)
 
-    print "merger has %d tasks left" % self.ntasks
+    print "merger\t%d tasks left" % self.ntasks
     tasks = self.next_tasks(n)
     for idx, cluster in tasks:
       if not (idx == 0 or self.valid_cluster_f(cluster)):

@@ -57,71 +57,6 @@ class SDRule(object) :
       return self.quality
   improvement = property(__improvement__)
 
-  def set_data(self, data):
-      # need to convert discrete conditions to the new dataset -- ugh
-      newconds = []
-      for cond in self.filter.conditions:
-          attr = self.data.domain[cond.position]
-          newattr = data.domain[attr.name]
-          if newattr.var_type == Orange.feature.Type.Discrete:
-              if type(cond) == Orange.data.filter.ValueFilterContinuous:
-                  # find discrete values within filtered range
-                  # construct new discrete filter
-                  subset_table = self.data.select_ref(Orange.data.filter.Values(
-                      domain=self.data.domain,
-                      conditions=[cond]))
-                  newvals = set()
-                  for row in subset_table:
-                      if row[attr].is_special():
-                          continue
-                      oldval = row[attr].value
-                      try:
-                          v = orange.Value(newattr, str(oldval))
-                          newvals.add(str(oldval))
-                      except:
-                          try:
-                              v = orange.Value(newattr, str(int(oldval)))
-                              newvals.add(str(int(oldval)))
-                          except:
-                              raise
-
-                  newvals = map(lambda v: orange.Value(newattr, v), newvals)
-              else:
-                  newvals = []
-                  for val in cond.values:
-                      try:
-                          newvals.append( orange.Value(newattr, attr.values[int(val)])  )
-                      except:
-                          pass
-
-              if not newvals:
-                  continue
-              
-              newcond = orange.ValueFilter_discrete(
-                  position = data.domain.index(newattr),
-                  values = newvals)
-              newconds.append(newcond)
-          else:
-              if type(cond) == Orange.data.filter.ValueFilterDiscrete:
-                  # construct new continuous condition
-                  newcond = Orange.data.filter.ValueFilterContinuous(
-                      position = data.domain.index(newattr),
-                      oper = orange.ValueFilter.Between,
-                      min = min(cond.values),
-                      max = max(cond.values))
-              else:
-                  newcond = cond
-              newconds.append(newcond)
-      
-      self.filter = orange.Filter_values(domain = data.domain,
-                                          conditions=newconds,
-                                          conjunction=1,
-                                          negate=self.filter.negate)
-                  
-      
-      self.data = data 
-      self.filterAndStore()
-
   def __get_examples__(self):
       if not self.__examples__:
           self.__examples__ = self.filter_table(self.data)
@@ -472,6 +407,7 @@ class SDRule(object) :
     Useful for JSONifying the rule
     """
     ret = {
+      'pos': None,
       'col': None,
       'type': None,
       'vals': None
@@ -479,6 +415,7 @@ class SDRule(object) :
 
     domain = self.data.domain
     ret['col'] = name = domain[c.position].name        
+    ret['pos'] = c.position
 
     if domain[c.position].varType == orange.VarTypes.Discrete:
       if len(c.values) == 0 or len(c.values) == len(domain[c.position].values):
@@ -501,8 +438,19 @@ class SDRule(object) :
       ret['vals'] = [max(-1e100, c.min), min(1e100, c.max)]
 
     return ret
+  
+  @staticmethod
+  def dictToCond(d, data):
+    if d['type'] == 'num':
+      return orange.ValueFilter_continuous(
+          position = d['pos'],
+          oper = orange.ValueFilter.Between,
+          min = d['vals'][0],
+          max = d['vals'][1]
+      )
 
-
+    vals = [orange.Value(data.domain[d['col']], val) for val in d['vals']]
+    return orange.ValueFilter_discrete(position=d['pos'], values=vals)
 
 
   def ruleToString(self):
@@ -544,6 +492,21 @@ class SDRule(object) :
       dicts = filter(bool, dicts)
       return dicts
   cond_dicts = property(toCondDicts)
+
+  def to_json(self):
+    return {
+      'conds': self.toCondDicts(),
+      'c_range': self.c_range,
+      'quality': self.quality
+    }
+
+  @staticmethod
+  def from_json(j, data=None):
+    conds = [SDRule.dictToCond(d, data) for d in j['conds']]
+    rule = SDRule(data, None, conds, None)
+    rule.c_range = j['c_range']
+    rule.quality = j['quality']
+    return rule
 
 
   

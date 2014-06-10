@@ -391,8 +391,8 @@ class Cluster(object):
         attr = domain[col]
         pos = domain.index(attr)
         table_bound = cont_dists[attr.name]
-        minv, maxv = max(table_bound.min, bound[0]), min(table_bound.max, bound[1])
-        if maxv - minv > 0.9 * (table_bound.max-table_bound.min):
+        minv, maxv = r_intersect(bound, [table_bound.min, table_bound.max])
+        if maxv - minv > 0.99 * (table_bound.max-table_bound.min):
           continue
         
         conds.append(

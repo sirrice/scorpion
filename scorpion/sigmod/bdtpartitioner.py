@@ -8,6 +8,8 @@ sys.path.extend(['.', '..'])
 
 from collections import deque
 from itertools import chain
+from multiprocessing import Process, Queue, Pool, Pipe
+from Queue import Empty
 
 from ..learners.cn2sd.rule import *
 from ..learners.cn2sd.refiner import *
@@ -23,6 +25,77 @@ from node import Node
 
 inf = 1e10000000
 _logger = get_logger()
+
+
+def nodes_to_clusters(nodes, table, cols):
+  clusters = []
+  rules = []
+  for node in nodes:
+    node.rule.quality = node.influence
+    rule = node.rule.simplify(node.rule(table))
+    rules.append(rule)
+
+  fill_in_rules(rules, table, cols=cols)
+  for rule in rules:
+    cluster = Cluster.from_rule(rule, cols)
+    cluster.states = node.states
+    cluster.cards = node.cards
+    clusters.append(cluster)
+  return clusters
+
+
+def partition_f(name, params, tables, full_table, (inq, outq)):
+  try:
+    partitioner = BDTTablesPartitioner(**params)
+    partitioner.setup_tables(tables, full_table)
+    gen = partitioner()
+    start = time.time()
+    while not partitioner.is_done:
+      try: 
+        bound = inq.get(False)
+        if bound:
+          for idx, inf_bound in enumerate(partitioner.inf_bounds):
+            partitioner.inf_bounds[idx] = r_union(bound, inf_bound)
+      except Empty:
+        pass
+
+      rules = []
+      for node in gen:
+        rule = node.rule
+        rule.quality = node.influence
+        rule = rule.simplify(full_table)
+        rules.append(rule)
+        if len(rules) >= 10: break
+
+      if not rules: 
+        if not partitioner.is_done:
+          print "%s\tno nodes from generator but partitioner not done..."%name
+        continue
+
+      bound = [inf, -inf]
+      for inf_bound in partitioner.inf_bounds:
+        bound = r_union(bound, inf_bound)
+
+      print "%s\tsend %d rules\t%s bound" % (name, len(rules), bound)
+      dicts = [r.to_json() for r in rules]
+      outq.put((dicts, bound))
+      print "%s\tsent %s!" % (name, len(dicts))
+  except Exception as e:
+    print e
+    import traceback
+    traceback.print_exc()
+
+  print "%s\tpartitioner DONE" % name
+  outq.put('done')
+  outq.close()
+  inq.close()
+
+
+
+      
+
+
+
 
 
 
@@ -48,6 +121,7 @@ class BDTTablesPartitioner(Basic):
 
         self.sampler = Sampler(self.SCORE_ID)
         self.seen = set()
+        self.is_done = False
 
 
         if self.err_funcs is None:
@@ -78,11 +152,13 @@ class BDTTablesPartitioner(Basic):
 
 
 
-    def __call__(self, tables, full_table, root=None, **kwargs):
-      self.setup_tables(tables, full_table)
+    def __call__(self, tables=None, full_table=None, root=None, **kwargs):
+      if tables and full_table:
+        self.setup_tables(tables, full_table)
+
       self.seen = set()
       if not root:
-        root = Node(SDRule(full_table, None))
+        root = Node(SDRule(self.merged_table, None))
       self.root = root
 
       samples = [self.sample(t, sr) for t, sr in zip(self.tables, self.samp_rates)]
@@ -94,9 +170,12 @@ class BDTTablesPartitioner(Basic):
         parent = leaf.parent
         leaf.parent = None
         #self.grow(leaf, self.tables, self.samp_rates, all_infs)
-        self.grow(leaf, samples, self.samp_rates, all_infs)
+        for n in self.grow(leaf, samples, self.samp_rates, all_infs):
+          yield n
         leaf.parent = parent
-      return self.root.nodes
+
+      self.is_done = True
+      #return self.root.nodes
 
     @instrument
     def sample(self, data, samp_rate):
@@ -323,100 +402,116 @@ class BDTTablesPartitioner(Basic):
 
 
     def grow(self, node, tables, samp_rates, sample_infs=None):
-        if self.time_exceeded():
-          _logger.debug("time exceeded %.2f > %d", (time.time()-self.start_time), self.max_wait)
-          return node
+      if self.time_exceeded():
+        _logger.debug("time exceeded %.2f > %d", (time.time()-self.start_time), self.max_wait)
+        yield node
+        return
+        #return node
 
-        if node.rule in self.seen:
-          _logger.debug("rule seen %d\t%s", hash(node.rule), node.rule)
-          return node
-        self.seen.add(node.rule)
+      if node.rule in self.seen:
+        _logger.debug("rule seen %d\t%s", hash(node.rule), node.rule)
+        yield node
+        return
+        #return node
+      self.seen.add(node.rule)
 
-        if self.start_time is None and node.depth >= 1:
-          self.start_time = time.time()
+      if self.start_time is None and node.depth >= 1:
+        self.start_time = time.time()
 
-        rule = node.rule
-        datas = tables
-        if not sample_infs:
-          datas = map(rule.filter_table, tables)
-        node.cards = map(len, datas)
-        node.n = sum(node.cards)
+      rule = node.rule
+      datas = tables
+      if not sample_infs:
+        datas = map(rule.filter_table, tables)
+      node.cards = map(len, datas)
+      node.n = sum(node.cards)
 
-        if node.n == 0:
-          return node
+      if node.n == 0:
+        yield node
+        return
+        #return node
 
-        #
-        # Precompute influences and scores
-        #
+      #
+      # Precompute influences and scores
+      #
 
-        samples = datas
-        if sample_infs is None:
-          f = lambda (idx, samps): self.compute_infs(idx, samps)
-          samples = [self.sample(*pair) for pair in zip(datas, samp_rates)]
-          sample_infs = map(f, enumerate(samples))
+      samples = datas
+      if sample_infs is None:
+        f = lambda (idx, samps): self.compute_infs(idx, samps)
+        samples = [self.sample(*pair) for pair in zip(datas, samp_rates)]
+        sample_infs = map(f, enumerate(samples))
 
-        curscore = self.get_score_for_infs(range(len(sample_infs)), sample_infs)
-        est_inf = self.estimate_inf(sample_infs)
-        node.set_score(est_inf)
+      curscore = self.get_score_for_infs(range(len(sample_infs)), sample_infs)
+      est_inf = self.estimate_inf(sample_infs)
+      node.set_score(est_inf)
 
-        if node.parent:
-          self.print_status(rule, datas, sample_infs)
-          if self.should_stop(sample_infs):
-            node.states = self.get_states(datas)
-            return node
-
-
-        if self.time_exceeded():
-          _logger.debug("time exceeded %.2f > %d", (time.time()-self.start_time), self.max_wait)
-          return node
-
-
-        #
-        # compute scores for each attribute to split on
-        #
-        attr_scores = []
-        for attr, new_rules in self.child_rules(rule):
-          if not new_rules: continue
-          scores = self.get_scores(new_rules, samples)
-          score = self.merge_scores(scores)
-          score = self.adjust_score(score, node, attr, new_rules)
-          _logger.debug("score:\t%.5f\t%s\t%s", score, attr.name, new_rules[0])
-          if score == -inf: continue
-          attr_scores.append((attr, new_rules, score, scores))
-
-
-        if not attr_scores:
+      if node.parent:
+        self.print_status(rule, datas, sample_infs)
+        if self.should_stop(sample_infs):
           node.states = self.get_states(datas)
-          return node
+          yield node
+          return
+          #return node
 
-        attr_scores.sort(key=lambda p: p[-2])
 
-        attr, new_rules, score, scores = attr_scores[0]
-        node.score = min(scores) 
-        minscore = curscore - abs(curscore) * self.min_improvement
-        if node.score >= minscore and minscore != -inf:
-          _logger.debug("score didn't improve\t%.7f >= %.7f", min(scores), minscore)
-          return node
+      if self.time_exceeded():
+        _logger.debug("time exceeded %.2f > %d", (time.time()-self.start_time), self.max_wait)
+        yield node
+        return 
+        #return node
 
-        ncands = max(1, 2 - node.depth)
-        for attr, new_rules, score, scores in attr_scores[:ncands]:
-          data2infs, rule2infs, rule2datas = self.databyrule2infs(new_rules, datas)
-          #new_srses = self.update_sample_rates(new_rules, data2infs, samp_rates)
-          new_srses = [samp_rates] * len(new_rules)
-          new_pairs = zip(new_rules, new_srses)
-          new_pairs.sort(key=lambda (new_r, new_s): new_r.quality, reverse=True)
 
-          for new_rule, new_srs in new_pairs:
-            child = Node(new_rule)
-            child.prev_attr = attr
-            child.parent = node
-            node.add_child(child)
+      #
+      # compute scores for each attribute to split on
+      #
+      attr_scores = []
+      for attr, new_rules in self.child_rules(rule):
+        if not new_rules: continue
+        scores = self.get_scores(new_rules, samples)
+        score = self.merge_scores(scores)
+        score = self.adjust_score(score, node, attr, new_rules)
+        _logger.debug("score:\t%.5f\t%s\t%s", score, attr.name, new_rules[0])
+        if score == -inf: continue
+        attr_scores.append((attr, new_rules, score, scores))
 
-            args = (child, rule2datas[new_rule], new_srs, rule2infs[new_rule])
-            #self.candidates.add((score, new_rule.quality, args))
-            self.grow(*args)
 
-        return node
+      if not attr_scores:
+        node.states = self.get_states(datas)
+        yield node
+        return
+        #return node
+
+      attr_scores.sort(key=lambda p: p[-2])
+
+      attr, new_rules, score, scores = attr_scores[0]
+      node.score = min(scores) 
+      minscore = curscore - abs(curscore) * self.min_improvement
+      if node.score >= minscore and minscore != -inf:
+        _logger.debug("score didn't improve\t%.7f >= %.7f", min(scores), minscore)
+        yield node
+        return
+        #return node
+
+      ncands = max(1, 2 - node.depth)
+      for attr, new_rules, score, scores in attr_scores[:ncands]:
+        data2infs, rule2infs, rule2datas = self.databyrule2infs(new_rules, datas)
+        #new_srses = self.update_sample_rates(new_rules, data2infs, samp_rates)
+        new_srses = [samp_rates] * len(new_rules)
+        new_pairs = zip(new_rules, new_srses)
+        new_pairs.sort(key=lambda (new_r, new_s): new_r.quality, reverse=True)
+
+        for new_rule, new_srs in new_pairs:
+          child = Node(new_rule)
+          child.prev_attr = attr
+          child.parent = node
+          node.add_child(child)
+
+          args = (child, rule2datas[new_rule], new_srs, rule2infs[new_rule])
+          #self.candidates.add((score, new_rule.quality, args))
+          for n in self.grow(*args):
+            yield n
+
+      yield node
+      #return node
 
 
     @instrument
