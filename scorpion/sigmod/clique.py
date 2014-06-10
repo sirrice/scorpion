@@ -113,19 +113,23 @@ class MR(Basic):
   def __call__(self, full_table, bad_tables, good_tables, **kwargs):
     self.setup_tables(full_table, bad_tables, good_tables, **kwargs)
     self.update_status("running bottom up algorithm")
-    return self.find_cliques()
+    for blahs in self.find_cliques():
+      # transform blahs to rules
+      rules = [b.rule for b in blahs]
+      print "clique\tsend back %d rules" % len(rules)
+      yield rules
+
 
   def find_cliques(self):
     """
     table has been trimmed of extraneous columns.
     """
-    clusters = self.load_from_cache()
-    if clusters is not None:
-      yield clusters
-      return 
+    #clusters = self.load_from_cache()
+    #if clusters is not None:
+      #yield clusters
+      #return 
 
     rules = None
-    all_bests = set()
     self.best = []
     self.start = time.time()
 
@@ -150,17 +154,9 @@ class MR(Basic):
         nseen += 1
         if self.stop:
             break
-        print "clique\t", str(ro)
 
         if self.top_k(ro):
           nadded += 1
-
-        if nadded % 25 == 0 and nadded > 0:
-          newbests = ifilter(lambda c: c not in seen, self.best)
-          to_yield = map(self.blah_to_cluster, newbests)
-          seen.update(self.best)
-          all_bests.update(to_yield)
-          yield to_yield
 
         if self.naive:
             new_rules[attr] = [None]
@@ -170,11 +166,16 @@ class MR(Basic):
             nnewgroups += 1
         ro.rule.__examples__ = None
 
-      newbests = ifilter(lambda c: c not in seen, self.best)
-      to_yield = map(self.blah_to_cluster, newbests)
+
+        if nadded % 25 == 0 and nadded > 0:
+          newbests = filter(lambda c: c not in seen, self.best)
+          seen.update(self.best)
+          yield newbests
+
+
+      newbests = filter(lambda c: c not in seen, self.best)
       seen.update(self.best)
-      all_bests.update(to_yield)
-      yield to_yield
+      yield newbests
       if not nadded: 
         break 
 
@@ -193,13 +194,7 @@ class MR(Basic):
     _logger.debug("finished, merging now")
     self.cost_clique = time.time() - self.start
 
-    clusters = all_bests
-    if self.DEBUG:
-      renderer = JitteredClusterRenderer('/tmp/clique.pdf')
-      renderer.plot_clusters(clusters)
-      renderer.close()
-
-    self.cache_results(clusters)
+    #self.cache_results(clusters)
 
   def blah_to_cluster(self, blah):
     rule = blah.rule

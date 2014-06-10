@@ -118,6 +118,23 @@ def load_tables(obj, aggerr, **kwargs):
   return cols, bad_tables, good_tables, full_table, all_full_table
 
 
+def rules_to_clusters(rules, learner):
+  clusters = []
+  fill_in_rules(
+    rules, 
+    learner.full_table, 
+    cols=learner.cols, 
+    cont_dists=learner.cont_dists
+  )
+  for r in rules:
+    c = Cluster.from_rule(r, learner.cols)
+    learner.influence_cluster(c)
+    c.c_range = list(learner.c_range)
+    c.inf_func = learner.create_inf_func(c)
+    clusters.append(c)
+  return clusters
+
+
 
 
 def serial_hybrid(obj, aggerr, **kwargs):
@@ -145,6 +162,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
   parallel = params.get('parallel', False)
   print "executing in parallel?", parallel
 
+  start = time.time()
 
   if parallel:
     clusters = []
@@ -155,25 +173,23 @@ def serial_hybrid(obj, aggerr, **kwargs):
     proc.start()
 
     # loop
-    for batch in learner(all_full_table, bad_tables, good_tables):
-      if not batch: continue
-      batch_dicts = [c.to_dict() for c in batch]
-      _logger.debug("main\tsend to child proc %d rules" % len(batch_dicts))
-      par2chq.put(batch_dicts)
+    for rules in learner(all_full_table, bad_tables, good_tables):
+      if not rules: continue
+      jsons = [r.to_json() for r in rules]
+      _logger.debug("main\tsend to child proc %d rules" % len(jsons))
+      par2chq.put(jsons)
     _logger.debug("main\tsend to child proc DONE")
     par2chq.put('done')
     par2chq.close()
+    learner.update_status("waiting for merging step to finish")
 
     # wait for results from merger to come back
-    batch = ch2parq.get()
-    batch = [Cluster.from_dict(d) for d in batch]
-    clusters.extend(batch)
+    jsons = ch2parq.get()
+    rules = [SDRule.from_json(d, learner.full_table) for d in jsons]
     ch2parq.close()
     proc.join()
 
-    for c in clusters:
-      c.to_rule(full_table,learner.cont_dists, learner.disc_dists)
-      c.inf_func = learner.create_inf_func(c)
+    clusters = rules_to_clusters(rules, learner)
 
   else:
     mparams = dict(params)
@@ -184,23 +200,25 @@ def serial_hybrid(obj, aggerr, **kwargs):
     })
     merger = StreamRangeMerger(**mparams)
 
-    start = time.time()
-    clusters = []
-    for batch in learner(all_full_table, bad_tables, good_tables):
-      merger.add_clusters(batch)
+    for rules in learner(all_full_table, bad_tables, good_tables):
+      clusters = rules_to_clusters(rules, learner)
+      merger.add_clusters(clusters)
       learner.update_rules(
         aggerr.agg.shortname, 
         group_clusters(merger.best_so_far(), learner)
       )
       merger()
+
+    learner.update_status("waiting for merging step to finish")
     while merger.has_next_task():
       merger()
       learner.update_rules(
         aggerr.agg.shortname, 
         group_clusters(merger.best_so_far(), learner)
       )
-    clusters = list(merger.best_so_far())
-    costs['rules_get'] = time.time() - start
+    clusters = merger.best_so_far()
+
+  costs['rules_get'] = time.time() - start
 
   clusters = list(clusters)
 
@@ -220,7 +238,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
   # return the best rules first in the list
   start = time.time()
   rules.sort(key=lambda r: r.c_range[0])
-  rules = [r.simplify(all_full_table) for r in rules]
+  rules = [r.simplify(cdists=learner.cont_dists, ddists=learner.disc_dists) for r in rules]
   costs['rules_simplify'] = time.time() - start
 
 
@@ -253,45 +271,47 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
 
   # setup a merger
   merged = []
-  dicts = []
+  jsons = []
   done = False
   while not done or merger.has_next_task():
     if not done:
       try:
-        dicts = in_conn.get(False)
+        jsons = in_conn.get(False)
       except Empty:
-        dicts = []
+        jsons = []
         pass
 
-    if dicts == 'done': 
+    if jsons == 'done': 
       done = True
-      dicts = []
+      jsons = []
 
     try:
-      clusters = []
-      for d in dicts:
-        c = Cluster.from_dict(d)
-        c.to_rule(learner.full_table, learner.cont_dists, learner.disc_dists)
-        learner.influence_cluster(c)
-        c.c_range = list(merger.c_range)
-        c.inf_func = learner.create_inf_func(c)
-        clusters.append(c)
+      rules = [SDRule.from_json(d, learner.full_table) for d in jsons]
+      clusters = rules_to_clusters(rules, learner)
 
       if clusters:
         _logger.debug("merger\tadd_clusters %d" % len(clusters))
-        merger.add_clusters(clusters)
+        added = merger.add_clusters(clusters)
+
+        if added:
+          start = time.time()
+          merged = list(merger.best_so_far())
+          rules = group_clusters(merged, learner)
+          rules = [r.simplify(cdists=learner.cont_dists, ddists=learner.disc_dists) for r in rules]
+          learner.update_rules(aggerr.agg.shortname, rules)
+          _logger.debug("merger\tadded %d rules\t%.4f sec" % (len(rules), time.time()-start))
 
       if merger.has_next_task():
         _logger.debug("merger\tprocess tasks\t%d tasks left" % merger.ntasks)
         if merger():
+          start = time.time()
           merged = list(merger.best_so_far())
           rules = group_clusters(merged, learner)
+          rules = [r.simplify(cdists=learner.cont_dists, ddists=learner.disc_dists) for r in rules]
           learner.update_rules(aggerr.agg.shortname, rules)
-          _logger.debug("merger\tupdated %d rules" % len(rules))
+          _logger.debug("merger\tupdated %d rules\t%.4f sec" % (len(rules), time.time()-start))
         else:
           _logger.debug("merger\tno improvements")
-      else:
-        time.sleep(0.5)
 
     except Exception as e:
       print "problem in merger process"
@@ -306,7 +326,7 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   if not merged:
     merged = merger.best_so_far()
   _logger.debug("merger\tsending %d results back" % len(merged))
-  out_conn.put([c.to_dict() for c in merged])
+  out_conn.put([c.rule.to_json() for c in merged])
   in_conn.close()
   out_conn.close()
   print "child DONE"
@@ -350,6 +370,7 @@ def get_hierarchies(clusters):
   """
   Return a child -> parent relationship mapping
   """
+  clusters = list(clusters)
   child2parent = {}
   for idx, c1 in enumerate(clusters):
     for c2 in clusters[idx+1:]:
@@ -411,6 +432,7 @@ def group_to_rule(clusters):
   """
   if len(clusters) == 0: return None
   rule = max(clusters, key=lambda c: r_vol(c.c_range)).rule
+  clusters = list(clusters)
   for c in clusters[1:]:
     rule.cluster_rules = []
     rule.cluster_rules.append(c.rule)

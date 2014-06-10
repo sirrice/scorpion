@@ -97,24 +97,20 @@ class SDRule(object) :
           name = attr.name
           conds[name] = True
 
-      filtered = self.filter_table(table)
-      filteredarr = filtered.to_numpyMA('ac')[0]
-
       for col, bounds in ref_bounds.iteritems():
           if col in conds:
               continue
 
+          attr = domain[col]
+          pos = domain.index(attr)
+
           if bounds is None:
-              attr = domain[col]
-              pos = domain.index(attr)
-#                vals = map(int, set(filteredarr[:,pos]))
               vals = range(len(attr.values))
               vals = [orange.Value(attr, attr.values[v]) for v in vals]
               cond = orange.ValueFilter_discrete(position=pos, values=vals)
           else:
               (minv, maxv) = bounds
               
-              pos = domain.index(domain[col])
               cond = orange.ValueFilter_continuous(
                   position=pos,
                   oper = orange.ValueFilter.Between,
@@ -360,9 +356,13 @@ class SDRule(object) :
         )
       else:
         fb = cdists[attr.name]
+        #sb = scdists[attr.name]
+        old_bound = [fb.min, fb.max]
+        cond_bound = [old_cond.min, old_cond.max]
 
-        bound = r_intersect([old_cond.min, old_cond.max], [fb.min, fb.max])
-        if not r_vol(bound): continue
+        bound = r_intersect(old_bound, cond_bound)
+        if r_vol(bound) >= r_vol(old_bound): continue
+        #bound = r_intersect(bound, [sb.min, sb.max])
         cond = old_cond
         cond.min, cond.max = bound[0], bound[1]
       conds.append(cond)

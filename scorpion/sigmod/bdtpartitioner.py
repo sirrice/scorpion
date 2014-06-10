@@ -51,21 +51,21 @@ def partition_f(name, params, tables, full_table, (inq, outq)):
 
       if not rules: 
         if not partitioner.is_done:
-          print "%s\tno nodes from generator but partitioner not done..."%name
+          _logger.debug("%s\tno nodes from generator but partitioner not done..."%name)
         continue
 
       bound = partitioner.get_inf_bound()
 
       dicts = [r.to_json() for r in rules]
-      print "%s\tsend %d rules\t%s" % (name, len(rules), map(hash, map(str, dicts)))
+      _logger.debug("%s\tsend %d rules\t%s" % (name, len(rules), map(hash, map(str, dicts))))
       outq.put((dicts, bound))
-      print "%s\tsent %s!" % (name, len(dicts))
+      _logger.debug("%s\tsent %s!" % (name, len(dicts)))
   except Exception as e:
     print e
     import traceback
     traceback.print_exc()
 
-  print "%s\tpartitioner DONE" % name
+  _logger.debug("%s\tpartitioner DONE" % name)
   outq.put('done')
   outq.close()
   inq.close()
@@ -398,13 +398,11 @@ class BDTTablesPartitioner(Basic):
         _logger.debug("time exceeded %.2f > %d", (time.time()-self.start_time), self.max_wait)
         yield node
         return
-        #return node
 
       if node.rule in self.seen:
         _logger.debug("rule seen %d\t%s", hash(node.rule), node.rule)
         yield node
         return
-        #return node
       self.seen.add(node.rule)
 
       if self.start_time is None and node.depth >= 1:
@@ -420,7 +418,6 @@ class BDTTablesPartitioner(Basic):
       if node.n == 0:
         yield node
         return
-        #return node
 
       #
       # Precompute influences and scores
@@ -442,14 +439,12 @@ class BDTTablesPartitioner(Basic):
           node.states = self.get_states(datas)
           yield node
           return
-          #return node
 
 
       if self.time_exceeded():
         _logger.debug("time exceeded %.2f > %d", (time.time()-self.start_time), self.max_wait)
         yield node
         return 
-        #return node
 
 
       #
@@ -470,7 +465,6 @@ class BDTTablesPartitioner(Basic):
         node.states = self.get_states(datas)
         yield node
         return
-        #return node
 
       attr_scores.sort(key=lambda p: p[-2])
 
@@ -481,7 +475,10 @@ class BDTTablesPartitioner(Basic):
         _logger.debug("score didn't improve\t%.7f >= %.7f", min(scores), minscore)
         yield node
         return
-        #return node
+
+      if node.score <= curscore - abs(curscore) * 0.05:
+        _logger.debug("good:\tbig improvement\t%s", str(new_rules[0]))
+        yield node
 
       ncands = max(1, 2 - node.depth)
       for attr, new_rules, score, scores in attr_scores[:ncands]:
@@ -503,7 +500,6 @@ class BDTTablesPartitioner(Basic):
             yield n
 
       yield node
-      #return node
 
 
     @instrument

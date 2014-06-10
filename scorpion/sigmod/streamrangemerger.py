@@ -65,7 +65,10 @@ class StreamRangeMerger(RangeMerger2):
 
 
   def add_clusters(self, clusters, idx=0):
-    if not clusters: return
+    """
+    Return list of new clusters that are on the frontier
+    """
+    if not clusters: return []
 
     if self.DEBUG:
       print "add_clusters"
@@ -89,6 +92,8 @@ class StreamRangeMerger(RangeMerger2):
         if tidx == 0: continue
         checker = lambda c: any(map(base_frontier.__contains__, c.ancestors))
         self.tasks[tidx] = filter(checker, self.tasks[tidx])
+
+    return clusters
 
   @property
   def ntasks(self):

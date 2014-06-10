@@ -105,70 +105,6 @@ class BDT(Basic):
         clusters.append(cluster)
       return clusters
 
-    def nodes_to_popular_clusters(self, nodes, table):
-      """
-      Look for clauses found in more than X% of the nodes
-      and turn them into clusters
-      """
-      if not nodes: return []
-      from collections import Counter
-      counter = Counter()
-      str_to_rule = {}
-
-      for node in nodes:
-        r = node.rule
-        if len(r.filter.conditions) > 1:
-          for cond in r.filter.conditions:
-            newr = SDRule(r.data, r.targetClass, [cond], r.g)
-            newr.quality = node.influence
-            counter[newr] += 1
-            str_to_rule[newr] = newr
-
-      if len(counter) == 0:
-        return []
-
-      thresh = np.percentile(counter.values(), 80)
-      rules = []
-      for strrule, count in counter.iteritems():
-        if count >= thresh:  #0.25 * len(nodes):
-          r = str_to_rule[strrule]
-          rules.append(r)
-
-      fill_in_rules(rules, table, cols=self.cols)
-      clusters = [Cluster.from_rule(r, self.cols) for r in rules]
-      return clusters
-
-
-    @instrument
-    def merge(self, clusters, nonleaves):
-      if len(clusters) <= 1:
-          return clusters
-
-      self.update_status("starting merge phase")
-      start = time.time()
-      if [attr for attr in self.full_table.domain if attr.varType == orange.VarTypes.Discrete]:
-        use_mtuples = False
-      else:
-        use_mtuples = self.use_mtuples
-      params = dict(self.params)
-      params.update({
-        'learner_hash': hash(self),
-        'learner' : self,
-        'cols' : self.cols,
-        'c_range': self.c_range,
-        'use_mtuples' : use_mtuples
-      })
-      #self.merger = StreamRangeMerger(**params)
-      self.merger = RangeMerger2(**params)
-      #self.merger = Merger(**params)
-
-
-      merged_clusters = self.merger(to_add)
-      #merged_clusters = self.merger(clusters)
-      self.merge_cost = time.time() - start
-
-      self.merge_stats(self.merger.stats, 'merge_')
-      return merged_clusters
 
     def pick_clusters(self, clusters, nonleaves):
       """
@@ -310,25 +246,20 @@ class BDT(Basic):
         #return clusters, nonleaf_clusters
 
       max_wait = self.params.get('max_wait', kwargs.get('max_wait', None))
-      bad_max_wait = good_max_wait = None
-      if max_wait:
-        bad_max_wait = max_wait * 2. / 3.
-        good_max_wait = max_wait / 3.
-
 
       bad_params = dict(self.params)
       bad_params.update(kwargs)
       bad_params.update({
         'SCORE_ID': self.SCORE_ID,
         'err_funcs': self.bad_err_funcs,
-        'max_wait': bad_max_wait
+        'max_wait': max_wait
       })
       good_params = dict(self.params)
       good_params.update(kwargs)
       good_params.update({
         'SCORE_ID': self.SCORE_ID,
         'err_funcs': self.good_err_funcs,
-        'max_wait': good_max_wait
+        'max_wait': max_wait
       })
 
       if not self.parallel:
@@ -336,20 +267,16 @@ class BDT(Basic):
         partitioner = BDTTablesPartitioner(**bad_params)
         partitioner.setup_tables(bad_tables, full_table)
         gen = partitioner()
-        nodes = [n for n in gen]
-        clusters = self.nodes_to_clusters(nodes, full_table)
-        map(self.influence_cluster, clusters)
-        yield clusters
+        rules = [n.rule for n in gen]
+        yield rules
         bound = partitioner.get_inf_bound()
 
         partitioner = BDTTablesPartitioner(**good_params)
         partitioner.setup_tables(good_tables, full_table)
         partitioner.update_inf_bound(bound)
         gen = partitioner()
-        nodes = [n for n in gen]
-        clusters = self.nodes_to_clusters(nodes, full_table)
-        map(self.influence_cluster, clusters)
-        yield clusters
+        rules = [n.rule for n in gen]
+        yield rules
         return
 
 
@@ -404,12 +331,9 @@ class BDT(Basic):
           dicts.extend(gnodes)
 
         if dicts:
-          print "bdt\tgot %s\t%s" % (len(dicts), map(hash, map(str, dicts)))
+          _logger.debug("part\tgot %s\t%s" % (len(dicts), map(hash, map(str, dicts))))
           rules = [SDRule.from_json(d, full_table) for d in dicts]
-          fill_in_rules(rules, full_table, cols=self.cols)
-          clusters = [Cluster.from_rule(rule, self.cols) for rule in rules]
-          map(self.influence_cluster, clusters)
-          yield clusters
+          yield rules
 
       self.update_status("done partitioning")
       bad_p2cq.close()
@@ -422,116 +346,11 @@ class BDT(Basic):
       return
 
 
-
-
-
-
-      ## 
-      ## Setup and run partitioner for bad outputs
-      ##
-      #self.update_status("partitioning bad examples")
-      #params = dict(self.params)
-      #params.update(kwargs)
-      #params['SCORE_ID'] = self.SCORE_ID
-      #params['err_funcs'] = self.bad_err_funcs
-      #max_wait = params.get('max_wait', None)
-      #bad_max_wait = good_max_wait = None
-      #if max_wait:
-      #  bad_max_wait = max_wait * 2. / 3.
-      #  good_max_wait = max_wait / 3.
-
-
-      #start = time.time()
-      #params['max_wait'] = bad_max_wait
-      #bpartitioner = BDTTablesPartitioner(**params)
-      #bpartitioner(bad_tables, full_table)
-      #self.cost_partition_bad = time.time() - start
-      #tree = bpartitioner.root.clone()
-
-      #clusters = self.nodes_to_clusters(tree.leaves, full_table)
-      #for c in clusters:
-      #  self.influence_cluster(c)
-      #_logger.debug( "==== Best Leaf Nodes (%d total) ====" , len(clusters))
-      #_logger.debug( '\n'.join(map(str, sorted(clusters, reverse=True)[:10])))
-
-      #return clusters, []
-
-
-      #
-      #for hnode in tree.nodes:
-      #  hnode.frombad = True
-      #_logger.debug('\npartitioning bad tables done\n')
-
-      #start = time.time()
-
-      ## 
-      ## Setup and run partitioner for good outputs
-      ##
-      #self.update_status("partitioning good examples")
-      #inf_bound = [inf, -inf]
-      #for ib in bpartitioner.inf_bounds:
-      #  inf_bound = r_union(ib, inf_bound)
-      #inf_bounds = [list(inf_bound) for t in good_tables]
-      #print 'partitioner inf_bound: %.4f - %.4f' % tuple(inf_bound)
-
-      #params['err_funcs'] = self.good_err_funcs
-      #params['max_wait'] = good_max_wait
-      #hpartitioner = BDTTablesPartitioner(**params)
-      #hpartitioner.inf_bounds = inf_bounds
-      #hpartitioner(good_tables, full_table, root=tree)
-
-      #self.stats['partition_good'] = [time.time()-start, 1]
-      #self.cost_partition_good = time.time() - start
-
-
-      #leaves = list(tree.leaves)
-      #nonleaves = list(tree.nonleaves)
-      #_logger.debug( "==== Best Leaf Nodes (%d total) ====" , len(leaves))
-      #_logger.debug( '\n'.join(map(str, sorted(leaves, key=lambda n: n.influence)[:10])))
-
-
-      #self.update_status("reconciling %d partitions" % (len(nonleaves) + len(leaves)))
-      #start = time.time()
-      ##popular_clusters = self.nodes_to_popular_clusters(nonleaves, full_table)
-      #self.stats['intersect_partitions'] = [time.time()-start, 1]
-      #self.cost_split = time.time() - start
-
-
-
       ## NOTE: if good partitioner starts with tree from bad partitioner then
       ##       no need to intersect their results
       ##clusters = self.intersect(bclusters, hclusters)
-      #clusters = self.nodes_to_clusters(tree.leaves, full_table)
-      #nonleaf_clusters = self.nodes_to_clusters(nonleaves, full_table)
-      ##clusters.extend(popular_clusters)
-
-
-      #if False:
-      #  start = time.time()
-      #  for c in chain(clusters, nonleaf_clusters):
-      #    if not c.inf_state:
-      #      c.error = self.influence_cluster(c)
-      #  self.stats['init_cluster_errors'] = [time.time()-start, 1]
-
-      #if self.DEBUG:
-      #  renderer = ClusterRenderer('/tmp/bdt.pdf')
-      #  renderer.plot_clusters(clusters)
-      #  renderer.new_page()
-      #  renderer.plot_clusters(nonleaf_clusters)
-
-      #  tuples = [map(float,[row['a_0'], row['a_1'], row['v']]) for row in self.bad_tables[0]]
-      #  renderer.plot_tuples(tuples)
-      #  renderer.close()
-
-
 
       #self.cache_results(clusters, nonleaf_clusters)
-
-      #self.merge_stats(bpartitioner.stats, 'bdtp_bad_')
-      #self.merge_stats(hpartitioner.stats, 'bdtp_good_')
-
-
-      #return clusters, nonleaf_clusters
 
 
 
@@ -545,32 +364,6 @@ class BDT(Basic):
         for clusters in self.get_partitions(full_table, bad_tables, good_tables, **kwargs):
           yield clusters
         return
-
-        #clusters, nomerge_clusters = self.get_partitions(full_table, bad_tables, good_tables, **kwargs)
-        #self.all_clusters = self.pick_clusters(clusters, nomerge_clusters)
-        #return [self.all_clusters]
-
-
-        #_logger.debug('merging')
-        #final_clusters = self.merge(clusters, nomerge_clusters)        
-        ##final_clusters.extend(nomerge_clusters)
-
-        #self.final_clusters = final_clusters
-
-
-        #self.costs.update({
-        #  'cost_partition_bad' : self.cost_partition_bad,
-        #  'cost_partition_good' : self.cost_partition_good,
-        #  'cost_split' : self.cost_split
-        #})
-        #
-        #_logger.debug("=== Costs ===")
-        #for key, stat in sorted(self.stats.items(), key=lambda p: p[1][0]):
-        #  _logger.debug("%.4f\t%d\t%s", stat[0], stat[1], key)
-
-        #return self.final_clusters
-
-
 
 
     @instrument
