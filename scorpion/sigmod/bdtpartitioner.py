@@ -27,23 +27,6 @@ inf = 1e10000000
 _logger = get_logger()
 
 
-def nodes_to_clusters(nodes, table, cols):
-  clusters = []
-  rules = []
-  for node in nodes:
-    node.rule.quality = node.influence
-    rule = node.rule.simplify(node.rule(table))
-    rules.append(rule)
-
-  fill_in_rules(rules, table, cols=cols)
-  for rule in rules:
-    cluster = Cluster.from_rule(rule, cols)
-    cluster.states = node.states
-    cluster.cards = node.cards
-    clusters.append(cluster)
-  return clusters
-
-
 def partition_f(name, params, tables, full_table, (inq, outq)):
   try:
     partitioner = BDTTablesPartitioner(**params)
@@ -54,8 +37,7 @@ def partition_f(name, params, tables, full_table, (inq, outq)):
       try: 
         bound = inq.get(False)
         if bound:
-          for idx, inf_bound in enumerate(partitioner.inf_bounds):
-            partitioner.inf_bounds[idx] = r_union(bound, inf_bound)
+          partitioner.update_inf_bound(bound)
       except Empty:
         pass
 
@@ -72,12 +54,10 @@ def partition_f(name, params, tables, full_table, (inq, outq)):
           print "%s\tno nodes from generator but partitioner not done..."%name
         continue
 
-      bound = [inf, -inf]
-      for inf_bound in partitioner.inf_bounds:
-        bound = r_union(bound, inf_bound)
+      bound = partitioner.get_inf_bound()
 
-      print "%s\tsend %d rules\t%s bound" % (name, len(rules), bound)
       dicts = [r.to_json() for r in rules]
+      print "%s\tsend %d rules\t%s" % (name, len(rules), map(hash, map(str, dicts)))
       outq.put((dicts, bound))
       print "%s\tsent %s!" % (name, len(dicts))
   except Exception as e:
@@ -109,6 +89,7 @@ class BDTTablesPartitioner(Basic):
         self.p = kwargs.get('p', 0.6)
         self.tau = kwargs.get('tau', [0.001, 0.15])
         self.epsilon = kwargs.get('epsilon', 0.005)
+        self.partition_min_pts = 2
         self.min_pts = 5
         self.SCORE_ID = kwargs['SCORE_ID']
         self.inf_bounds = None 
@@ -150,7 +131,15 @@ class BDTTablesPartitioner(Basic):
         self.cont_attrs = filter(lambda c: c in self.cols, self.cont_attrs)
         self.dist_attrs = filter(lambda c: c in self.cols, self.dist_attrs)
 
+    def get_inf_bound(self):
+      bound = [inf, -inf]
+      for inf_bound in self.inf_bounds:
+        bound = r_union(bound, inf_bound)
+      return bound
 
+    def update_inf_bound(self, bound):
+      for idx, inf_bound in enumerate(self.inf_bounds):
+        self.inf_bounds[idx] = r_union(bound, inf_bound)
 
     def __call__(self, tables=None, full_table=None, root=None, **kwargs):
       if tables and full_table:
@@ -183,7 +172,7 @@ class BDTTablesPartitioner(Basic):
 
     def should_idx_stop(self, args):
       idx, infs = args
-      if len(infs) <= self.min_pts:
+      if len(infs) <= self.partition_min_pts:
           return True
 
       infmax = max(infs)
@@ -215,7 +204,7 @@ class BDTTablesPartitioner(Basic):
         minthresh = min(minthresh, self.compute_threshold(max(infs), idx))
       npts = sum(map(len, datas))
 
-      fmt = "%.3f\tidx(%d)\tnpts(%d)\tstd(%.6f)\tperc(%.4f)\tbound(%.5f, %.5f)\tthresh(%.6f)\t%s"
+      fmt = "status:\t%.3f\tid(%d)\tn(%d)\tstd(%.4f)\tperc(%.4f)\tbnd(%.3f, %.3f)\tthrsh(%.4f)\t%s"
       try:
         _logger.debug(fmt,
             perc_passed,
@@ -233,6 +222,8 @@ class BDTTablesPartitioner(Basic):
 
     def should_stop(self, sample_infs): 
       bools = map(self.should_idx_stop, enumerate(sample_infs))
+      if sum(map(len, sample_infs)) < self.min_pts: 
+        return True
       return reduce(and_, bools)
 
 
@@ -330,8 +321,20 @@ class BDTTablesPartitioner(Basic):
 
     def merge_scores(self, scores):
         if scores:
-          return np.percentile(scores, 75)
+          return np.percentile(scores, 75) #10)#75) #XXX: hack
         return -inf
+
+    def adjust_score(self, score, node, attr, rules):
+      # penalize excessive splitting along a single dimension if it is not helping
+      if attr.var_type == Orange.feature.Type.Discrete:
+        if attr == node.prev_attr:
+          score = score - (0.15) * abs(score)
+      else:
+        if attr == node.prev_attr:
+          #score = score + (0.01) * abs(score)
+          if False and self.skinny_penalty(rules):
+            score = score + (0.6) * abs(score)
+      return score
 
 
     def get_states(self, tables):#node):
@@ -355,17 +358,6 @@ class BDTTablesPartitioner(Basic):
 
         return states
     
-    def adjust_score(self, score, node, attr, rules):
-      # penalize excessive splitting along a single dimension if it is not helping
-      if attr.var_type == Orange.feature.Type.Discrete:
-        score = score - (0.15) * abs(score)
-      else:
-        if attr == node.prev_attr:
-          score = score + (0.01) * abs(score)
-          if False and self.skinny_penalty(rules):
-            score = score + (0.6) * abs(score)
-      return score
-
 
     @instrument
     def skinny_penalty(self, rules):
@@ -469,7 +461,7 @@ class BDTTablesPartitioner(Basic):
         scores = self.get_scores(new_rules, samples)
         score = self.merge_scores(scores)
         score = self.adjust_score(score, node, attr, new_rules)
-        _logger.debug("score:\t%.5f\t%s\t%s", score, attr.name, new_rules[0])
+        _logger.debug("score:\t%.4f\t%s\t%s", score, attr.name[:6], new_rules[0])
         if score == -inf: continue
         attr_scores.append((attr, new_rules, score, scores))
 

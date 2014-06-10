@@ -50,10 +50,7 @@ class BeamRefiner(object):
 
         # get rule's maximum attribute (in terms of position)        
         ignore_attrs = []
-        # if rule.filter.conditions:
-        #     c = max(rule.filter.conditions, key=lambda c: c.position)
-        #     ignore_attrs = rule.examples.domain.attributes[:c.position]
-        
+
         for pos, (d,b,a,u) in enumerate(zip(ddists, bdists, attrs, useds)):
             if a in ignore_attrs:
                 continue            
@@ -113,18 +110,18 @@ class BeamRefiner(object):
 
             for minv, maxv in ranges:
                 if minv == maxv: # edge case
-                    continue
-                new_rule = rule.cloneAndAddContCondition(attr,
-                                                         minv,
-                                                         maxv,
-                                                         orange.ValueFilter.Between,
-                                                         used=used,
-                                                         negate=negate)
+                  continue
+                new_rule = rule.cloneAndAddContCondition(
+                  attr,
+                  minv,
+                  maxv,
+                  orange.ValueFilter.Between,
+                  used=used,
+                  negate=negate
+                )
                 new_rule.parent_rule = rule
                 if new_rule in self.bad_rules:
-                    continue
-                #if len(new_rule.examples) == len(rule.examples):
-                #    continue
+                  continue
                 
                 yield new_rule
 

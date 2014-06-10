@@ -324,30 +324,36 @@ class SDRule(object) :
   def simplify(self, data=None, cdists=None, ddists=None):
     """
     Args:
-      data:   filtered data
-      cdists: Continuous distribution
-      ddists: discrete distribution
+      data:   non-filtered! data
+      cdists: non-filtered Continuous distribution
+      ddists: non-filtered discrete distribution
     """
-    #subset = data and self(data) or self.data
-    data = data or self.data #examples
+    subset = data and self(data) or self.examples
+    data = data or self.data
     ret = self.clone()
 
     positions = [cond.position for cond in self.filter.conditions]
     cdists = cdists or Orange.statistics.basic.Domain(data)
     ddists = ddists or Orange.statistics.distribution.Domain(data)
+    #scdists = Orange.statistics.basic.Domain(subset)
+    sddists = Orange.statistics.distribution.Domain(subset)
 
     conds = []
     for old_cond, idx in zip(self.filter.conditions, positions):
       attr = data.domain[idx]
 
+      # if rule values == full dataset values, then remove rule
+      # filter down to the values that intersect the subset of data
       if attr.var_type == Orange.feature.Type.Discrete:
-        fd = ddists[attr.name]
-
+        full_d = ddists[attr.name]
+        sub_d = sddists[attr.name]
+        fvals = [k for k,v in full_d.items() if v]
         cvals = set([str(attr.values[int(v)]) for v in old_cond.values])
-        fvals = set([k for k,v in fd.items() if v])
-        #svals = [k for k,v in sd.items() if v]
-        vals = set(cvals).intersection(fvals)
-        if len(vals) == len(fvals): continue
+        if len(cvals) == len(fvals):
+          continue
+
+        dvals = [k for k,v in sub_d.items() if v]
+        vals = set(cvals).intersection(dvals)
         cond = orange.ValueFilter_discrete(
           position = idx,
           values = [orange.Value(attr, val) for val in vals]
@@ -449,7 +455,16 @@ class SDRule(object) :
           max = d['vals'][1]
       )
 
-    vals = [orange.Value(data.domain[d['col']], val) for val in d['vals']]
+    # XXX: hack
+    attr = data.domain[d['col']]
+    vals = []
+    for v in d['vals']:
+      if v is None:
+        if 'NULL' in attr.values:
+          v = 'NULL'
+        elif 'None' in attr.values:
+          v = 'None'
+      vals.append(orange.Value(attr, v))
     return orange.ValueFilter_discrete(position=d['pos'], values=vals)
 
 

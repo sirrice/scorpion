@@ -52,6 +52,7 @@ class Basic(object):
     self.p = kwargs.get('p', 0.5)
     self.bincremental = kwargs.get('bincremental', True)
     self.use_cache = kwargs.get('use_cache', False)
+    self.parallel = kwargs.get('parallel', False)
 
     self.DEBUG = kwargs.get('DEBUG', False)
 

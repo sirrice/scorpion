@@ -142,9 +142,11 @@ def serial_hybrid(obj, aggerr, **kwargs):
 
   learner = klass(**params)
   learner.setup_tables(all_full_table, bad_tables, good_tables)
+  parallel = params.get('parallel', False)
+  print "executing in parallel?", parallel
 
 
-  if kwargs.get('parallel', False):
+  if parallel:
     clusters = []
     par2chq = Queue()
     ch2parq = Queue()
@@ -186,10 +188,17 @@ def serial_hybrid(obj, aggerr, **kwargs):
     clusters = []
     for batch in learner(all_full_table, bad_tables, good_tables):
       merger.add_clusters(batch)
+      learner.update_rules(
+        aggerr.agg.shortname, 
+        group_clusters(merger.best_so_far(), learner)
+      )
       merger()
-      #clusters.extend(merger(batch))
     while merger.has_next_task():
       merger()
+      learner.update_rules(
+        aggerr.agg.shortname, 
+        group_clusters(merger.best_so_far(), learner)
+      )
     clusters = list(merger.best_so_far())
     costs['rules_get'] = time.time() - start
 
@@ -273,12 +282,14 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
         merger.add_clusters(clusters)
 
       if merger.has_next_task():
-        _logger.debug("merger\tprocess tasks")
-        merger()
-        merged = list(merger.best_so_far())
-        rules = group_clusters(merged, learner)
-        learner.update_rules(aggerr.agg.shortname, rules)
-        _logger.debug("merger\tupdated %d rules" % len(rules))
+        _logger.debug("merger\tprocess tasks\t%d tasks left" % merger.ntasks)
+        if merger():
+          merged = list(merger.best_so_far())
+          rules = group_clusters(merged, learner)
+          learner.update_rules(aggerr.agg.shortname, rules)
+          _logger.debug("merger\tupdated %d rules" % len(rules))
+        else:
+          _logger.debug("merger\tno improvements")
       else:
         time.sleep(0.5)
 

@@ -54,21 +54,7 @@ class StreamRangeMerger(RangeMerger2):
       self.adj_graph = self.make_adjacency([], True)
     self.adj_graph.insert(clusters)
     self.adj_graph.sync()
-
-  #frontiers = idx -> ContinuousFrontier
-
-  #cluster = (idx, cluster)
-
-  #queue = [ cluster* ]
-
-  #logically keep a pool of bests, and used_to_be_bests
-
-  #while True:
-  #  idx, cluster = queue.pop()
-  #  expanded = expandcluster()
-  #  expanded = frontiers[idx+1](expanded)
-  #  for c in expanded:
-  #    queue.push((idx+1, c))
+    return clusters
 
   def best_so_far(self):
     clusters = set()
@@ -85,7 +71,7 @@ class StreamRangeMerger(RangeMerger2):
       print "add_clusters"
       self.print_clusters(clusters)
 
-    self.setup_stats(clusters)
+    clusters = self.setup_stats(clusters)
     base_frontier = self.get_frontier_obj(idx)
     clusters, _ = base_frontier.update(clusters)
 
@@ -124,24 +110,28 @@ class StreamRangeMerger(RangeMerger2):
 
   def __call__(self, clusters=[], n=2):
     """
-    Return the best clusters seen so far across _all_ calls
+    Return any successfully expanded clusters (improvements)
     """
     self.add_clusters(clusters)
 
     print "merger\t%d tasks left" % self.ntasks
     tasks = self.next_tasks(n)
+    improvements = set()
     for idx, cluster in tasks:
       if not (idx == 0 or self.valid_cluster_f(cluster)):
         print "merger\tbelow thresh skipping\t %s" % cluster
         continue
 
-      expanded, rms = self.expand_frontier([cluster], self.seen, version=idx)
+      expanded = self.expand(cluster, self.seen, version=idx)
 
-      frontier, rms2 = self.get_frontier_obj(idx+1).update(expanded)
+      expanded, _ = self.get_frontier_obj(idx).update(expanded)
+      frontier, rms = self.get_frontier_obj(idx+1).update(expanded)
       improved_clusters = frontier.difference(set([cluster]))
       if not improved_clusters:
         continue
+      improvements.update(improved_clusters)
 
       self.adj_graph.insert(frontier, version=idx+1)
       self.add_clusters(improved_clusters, idx+1)
+    return improvements
  

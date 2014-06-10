@@ -122,7 +122,7 @@ class AdjacencyGraph(object):
   def neighbors(self, cluster, version=None):
     self.ensure_version(version)
     if version is not None:
-      return self.versions[version](cluster)
+      return self.versions[version].neighbors(cluster)
 
     ret = []
     for v in self.versions:

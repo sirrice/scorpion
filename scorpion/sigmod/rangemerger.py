@@ -444,12 +444,14 @@ class RangeMerger2(BaseRangeMerger):
     vals.sort(reverse=(direction == 'dec'))
     col = cluster.cols[dim]
     rng = self.learner.cont_dists[col]
-    min_step = r_vol([rng.min, rng.max]) * 0.05
+    min_step = r_vol([rng.min, rng.max]) * 0.005
     ret = []
     for v in vals:
       if not ret or abs(v-ret[-1]) > min_step:
         ret.append(v)
-    ret = random.sample(ret, min(4, len(ret)))
+    if len(ret) <= 4:
+      return ret
+    ret = random.sample(ret, 4)
     return ret
 
 
@@ -466,7 +468,9 @@ class RangeMerger2(BaseRangeMerger):
       tmp = set()
       realvals = self.pick_expansion_vals(cluster, dim, direction, vals)
       if direction != 'disc':
-        _logger.debug("# to expand\t%s\t%s\t%d -> %d\t%s -> %s", cluster.cols[dim][:10], direction, len(vals), len(realvals), str(vals), str(realvals))
+        _logger.debug("# to expand\t%s\t%s\t%d -> %d\t%s -> %s", 
+            cluster.cols[dim][:10], direction, len(vals), 
+            len(realvals), str(vals), str(realvals))
       if direction == 'inc':
         for inc in realvals:
           tmp.update([self.dim_merge(c, dim, None, inc, seen) for c in curset])

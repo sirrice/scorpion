@@ -94,7 +94,7 @@ class BDT(Basic):
       rules = []
       for node in nodes:
         node.rule.quality = node.influence
-        rule = node.rule.simplify(node.rule(table))#, self.cont_dists, self.disc_dists)
+        rule = node.rule.simplify(table, self.cont_dists, self.disc_dists)
         rules.append(rule)
 
       fill_in_rules(rules, table, cols=self.cols)
@@ -323,15 +323,6 @@ class BDT(Basic):
         'err_funcs': self.bad_err_funcs,
         'max_wait': bad_max_wait
       })
-
-      #partitioner = BDTTablesPartitioner(**bad_params)
-      #partitioner.setup_tables(bad_tables, full_table)
-      #gen = partitioner()
-      #for n in gen: 
-      #  yield self.nodes_to_clusters([n], full_table)
-      #return
-
-
       good_params = dict(self.params)
       good_params.update(kwargs)
       good_params.update({
@@ -340,7 +331,29 @@ class BDT(Basic):
         'max_wait': good_max_wait
       })
 
+      if not self.parallel:
+        self.update_status("running partitioners in serial")
+        partitioner = BDTTablesPartitioner(**bad_params)
+        partitioner.setup_tables(bad_tables, full_table)
+        gen = partitioner()
+        nodes = [n for n in gen]
+        clusters = self.nodes_to_clusters(nodes, full_table)
+        map(self.influence_cluster, clusters)
+        yield clusters
+        bound = partitioner.get_inf_bound()
 
+        partitioner = BDTTablesPartitioner(**good_params)
+        partitioner.setup_tables(good_tables, full_table)
+        partitioner.update_inf_bound(bound)
+        gen = partitioner()
+        nodes = [n for n in gen]
+        clusters = self.nodes_to_clusters(nodes, full_table)
+        map(self.influence_cluster, clusters)
+        yield clusters
+        return
+
+
+      self.update_status("running partitioners in parallel")
       bad_p2cq = Queue()
       bad_c2pq = Queue()
       good_p2cq = Queue()
@@ -362,6 +375,7 @@ class BDT(Basic):
           try:
             data = bad_c2pq.get(False)
             if data == 'done':
+              self.update_status("done partitioning outlier datasets")
               bdone = True
             else:
               (bnodes, bound) = data
@@ -372,6 +386,7 @@ class BDT(Basic):
           try:
             data = good_c2pq.get(False)
             if data == 'done':
+              self.update_status("done partitioning normal datasets")
               gdone = True
             else:
               gnodes = data[0]
@@ -382,13 +397,21 @@ class BDT(Basic):
         if bound and not gdone:
           good_p2cq.put(bound)
 
+        dicts = []
         if bnodes:
-          print "bdt\tgot %s" % len(bnodes)
-          rules = [SDRule.from_json(d, full_table) for d in bnodes]
+          dicts.extend(bnodes)
+        if gnodes:
+          dicts.extend(gnodes)
+
+        if dicts:
+          print "bdt\tgot %s\t%s" % (len(dicts), map(hash, map(str, dicts)))
+          rules = [SDRule.from_json(d, full_table) for d in dicts]
           fill_in_rules(rules, full_table, cols=self.cols)
           clusters = [Cluster.from_rule(rule, self.cols) for rule in rules]
+          map(self.influence_cluster, clusters)
           yield clusters
 
+      self.update_status("done partitioning")
       bad_p2cq.close()
       good_c2pq.close()
       bad_c2pq.close()

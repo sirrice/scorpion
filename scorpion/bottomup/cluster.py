@@ -235,21 +235,25 @@ class Cluster(object):
     discretes = {}
     
     for c in rule.filter.conditions:
-        attr = domain[c.position]
-        name = attr.name
-        if attr.varType == orange.VarTypes.Discrete:
-            if name in cols:
-                discretes[name] = [int(v) for v in c.values]
-        else:
-            name_to_bounds[name] = (c.min, c.max)
+      attr = domain[c.position]
+      name = attr.name
+      if attr.varType == orange.VarTypes.Discrete:
+        if name in cols:
+          try:
+            discretes[name] = [int(v) for v in c.values]
+          except Exception as e:
+            print e
+            print c.values
+      else:
+        name_to_bounds[name] = (c.min, c.max)
 
     mins, maxs = [], []
     cont_cols = []
     for col in cols:
-        if col in name_to_bounds:
-            mins.append(name_to_bounds[col][0])
-            maxs.append(name_to_bounds[col][1])
-            cont_cols.append(col)
+      if col in name_to_bounds:
+        mins.append(name_to_bounds[col][0])
+        maxs.append(name_to_bounds[col][1])
+        cont_cols.append(col)
         
     bbox = (tuple(mins), tuple(maxs))
     error = error or rule.quality
