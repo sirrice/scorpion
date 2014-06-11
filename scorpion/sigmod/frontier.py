@@ -239,6 +239,17 @@ class ContinuousFrontier(Frontier):
 
   @instrument
   def update(self, clusters):
+    adds, rms, new_spans = self.probe(clusters)
+
+    new_clusters = self.frontier_to_clusters(new_spans)
+    self.frontier.difference_update(rms)
+    self.frontier.update(new_clusters)
+    self.seen.update([c.bound_hash for c in clusters])
+    return adds, rms
+
+
+  @instrument
+  def probe(self, clusters):
     """
     merge clusters in argument with existing frontier
 
@@ -287,14 +298,9 @@ class ContinuousFrontier(Frontier):
     rms = set([c for c, n in beaten_counts.iteritems() if n > 0])
     new_spans = filter(lambda s: s[2] > s[1], new_spans)
     new_spans = filter(lambda s: s[0] in arg_frontier or s[0] in rms, new_spans)
-
-    new_clusters = self.frontier_to_clusters(new_spans)
-    self.frontier.difference_update(rms)
-    self.frontier.update(new_clusters)
-    self.seen.update([c.bound_hash for c in clusters])
-
     adds = set([c for c, minc, maxc in new_spans if c in arg_frontier])
-    return adds, rms
+
+    return adds, rms, new_spans
 
 
 class Intersection(object):

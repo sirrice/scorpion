@@ -106,6 +106,12 @@ class Cluster(object):
           d['discretes'] = [(k,list(v)) for k,v in self.discretes.iteritems()]
       return d
 
+  @property
+  def root(self):
+    cur = self
+    while cur.parents:
+      cur = cur.parents[0]
+    return cur
 
   def __volume__(self):
       return volume(self.bbox)

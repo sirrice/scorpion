@@ -81,6 +81,7 @@ class AdjacencyGraph(object):
     """
     for idx, v in enumerate(self.versions):
       buf = self.insert_bufs[idx]
+      if not buf: continue
       buf.update(v.clusters)
       self.versions[idx] = AdjacencyVersion(self.feature_mapper)
       self.versions[idx].bulk_init(list(buf))
@@ -137,7 +138,7 @@ class AdjacencyVersion(object):
     self.cid = 0
     self.disc_idxs = {}
     self.feature_mapper = feature_mapper
-    self.radius = .2
+    self.radius = .15
     self.metric = 'hamming'
 
     self._rtree = None  # internal datastructure
@@ -202,12 +203,11 @@ class AdjacencyVersion(object):
     bbox = cluster.bbox
     lower, higher = map(list, bbox)
     if self._ndim == 1:
-        lower.append(0)
-        higher.append(1)
+      lower.append(0)
+      higher.append(1)
 
     if enlarge != 0:
-      for idx in xrange(len(lower)):
-        col = cols[idx]
+      for idx, col in enumerate(cols):
         rng = enlarge * self.feature_mapper.ranges[col]
         lower[idx] -= rng
         higher[idx] += rng
@@ -280,8 +280,8 @@ class AdjacencyVersion(object):
       if ret is None:
         ret = idxs
       else:
-        #ret.intersection_update(idxs)
-        ret.update(idxs)
+        ret.intersection_update(idxs)
+        #ret.update(idxs)
       if not ret: return []
 
     idxs = self.search_rtree(cluster)

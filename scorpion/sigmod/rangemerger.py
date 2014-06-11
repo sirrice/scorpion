@@ -425,34 +425,30 @@ class RangeMerger(BaseRangeMerger):
     return bests
 
 
-def foo():
-
-  endmin, endmax = merge(vals[0]), merge(vals[-1])
-
-
-
 class RangeMerger2(BaseRangeMerger):
 
   def pick_expansion_vals(self, cluster, dim, direction, vals):
-    if direction == 'disc': return vals
-    vals = random.sample(vals, min(4, len(vals)))
-    if direction == 'inc':
-      vals.append(cluster.bbox[1][dim])
-    else:
-      vals.append(cluster.bbox[0][dim])
+    if direction == 'disc': 
+      return vals
+      return vals[:5]
+    if not vals: return vals
 
+    vals = random.sample(vals, min(4, len(vals)))
     vals.sort(reverse=(direction == 'dec'))
-    col = cluster.cols[dim]
-    rng = self.learner.cont_dists[col]
+
+    if direction == 'inc':
+      baseval = cluster.bbox[1][dim]
+    else:
+      baseval = cluster.bbox[0][dim]
+
+    rng = self.learner.cont_dists[cluster.cols[dim]]
     min_step = r_vol([rng.min, rng.max]) * 0.005
-    ret = []
-    for v in vals:
-      if not ret or abs(v-ret[-1]) > min_step:
-        ret.append(v)
-    if len(ret) <= 4:
-      return ret
-    ret = random.sample(ret, 4)
-    return ret
+    vals = filter(lambda v: abs(v-baseval) > min_step, vals)
+
+    if len(vals) <= 4:
+      return vals
+    vals = random.sample(vals, 4)
+    return vals
 
 
   @instrument

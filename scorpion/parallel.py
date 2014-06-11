@@ -250,6 +250,8 @@ def serial_hybrid(obj, aggerr, **kwargs):
   print "=== Costs ==="
   for key, cost in costs.iteritems():
     print "%.5f\t%s" % (cost, key)
+  for key, (cost, count) in learner.stats.iteritems():
+    print "%.5f\t%s\t%s" % (cost,key, count)
   
   return full_table, rules
 
@@ -329,6 +331,10 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   out_conn.put([c.rule.to_json() for c in merged])
   in_conn.close()
   out_conn.close()
+
+  for key, (cost, count) in merger.stats.iteritems():
+    print "%.5f\t%s\t%s" % (cost, key, count)
+ 
   print "child DONE"
 
 
@@ -361,9 +367,6 @@ def group_clusters(clusters, learner):
 
   rules = filter(bool, map(group_to_rule, groups))
   rules.sort(key=lambda r: r.c_range[0])
-  if not all(map(validf, rules)):
-    for r in rules: print r.c_range
-    pdb.set_trace()
   return rules
 
 def get_hierarchies(clusters):
@@ -431,8 +434,9 @@ def group_to_rule(clusters):
   return a single one
   """
   if len(clusters) == 0: return None
-  rule = max(clusters, key=lambda c: r_vol(c.c_range)).rule
-  clusters = list(clusters)
+  clusters = sorted(clusters, key=lambda c: r_vol(c.c_range), reverse=True)
+  rule = clusters[0].rule
+  rule.c_range = list(clusters[0].c_range)
   for c in clusters[1:]:
     rule.cluster_rules = []
     rule.cluster_rules.append(c.rule)

@@ -196,6 +196,7 @@ class Basic(object):
     gdeltas = map(abs, gdeltas)
     return bdeltas, bcounts, gdeltas, gcounts
 
+  @instrument
   def influence_from_state(self, bdeltas, bcounts, gdeltas, gcounts, c=None, nclauses=0):
     if c is None:
         c = self.c
@@ -213,6 +214,7 @@ class Basic(object):
     return cluster.error
 
 
+  @instrument
   def influence(self, rule, c=None):
     inf_state = self.influence_state(rule)
     quality = self.influence_from_state(*inf_state, nclauses=len(rule.filter.conditions))

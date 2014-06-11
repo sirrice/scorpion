@@ -114,10 +114,9 @@ class MR(Basic):
     self.setup_tables(full_table, bad_tables, good_tables, **kwargs)
     self.update_status("running bottom up algorithm")
     for blahs in self.find_cliques():
-      # transform blahs to rules
       rules = [b.rule for b in blahs]
-      print "clique\tsend back %d rules" % len(rules)
       yield rules
+    self.update_status("bottom up algorithm done")
 
 
   def find_cliques(self):

@@ -44,6 +44,7 @@ class Merger(object):
         self.base_clusters = []
         self.use_mtuples = kwargs.get('use_mtuples', True)
         self.use_cache = kwargs.get('use_cache', False)
+        self.nmerged = 0
 
         # whether or not the partitions cover the entire space (can assume adjacency)
         # False if output from merger
@@ -204,9 +205,13 @@ class Merger(object):
       if seen and merged.bound_hash in seen: 
         return None
       merged.rule = None
+      start = time.time()
       merged.rule = merged.to_rule(self.learner.full_table)
+      self.stats['merged.to_rule'][0] += time.time() - start
+      self.stats['merged.to_rule'][1] += 1
       merged.error = self.influence(merged)
       merged.parents = [cluster]
+      self.nmerged += 1
       if abs(merged.error) == float('inf'):
         return None
       return merged
@@ -222,9 +227,13 @@ class Merger(object):
       if seen and merged.bound_hash in seen: 
         return None
       merged.rule = None
+      start = time.time()
       merged.rule = merged.to_rule(self.learner.full_table)
+      self.stats['merged.to_rule'][0] += time.time() - start
+      self.stats['merged.to_rule'][1] += 1
       merged.error = self.influence(merged)
       merged.parents = [cluster]
+      self.nmerged += 1
 
       if abs(merged.error) == float('inf'):
         return None
@@ -279,6 +288,7 @@ class Merger(object):
         if disc_diffs:# and len(disc_diffs) <= 1:
           for dim, vals in disc_diffs.iteritems():
             dim_to_discs[dim].add(tuple(sorted(vals)))
+            #dim_to_discs[dim].update(vals)
       cost = time.time() - start
       self.stats['gather'][0] += cost
       self.stats['gather'][1] += 1
@@ -293,7 +303,12 @@ class Merger(object):
         yield (dim, 'inc', vals)
 
       for dim, vals in dim_to_discs.iteritems():
-        vals = filter(bool, sorted(vals, key=lambda v: len(v)))
+        if sum(map(len, vals)) < 10:
+          allvals = set()
+          map(allvals.update, vals)
+          vals = [set([v]) for v in allvals]
+        else:
+          vals = filter(bool, sorted(vals, key=lambda v: len(v)))
         yield (dim, 'disc', vals)
 
 
