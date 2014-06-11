@@ -8,7 +8,7 @@ def compute_bad_inf(bdelta, bcount, c):
   return float(bdelta / pow(bcount, c))
 compute_bad_inf = np.vectorize(compute_bad_inf)
 
-def compute_bad_score(bds, bcs, c, smooth=0.005):
+def compute_bad_score(bds, bcs, c, smooth=0.015):
   if not bds: return -float('inf')
 
   if len(filter(bool, bcs)) == 0:

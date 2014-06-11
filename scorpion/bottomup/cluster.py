@@ -197,7 +197,7 @@ class Cluster(object):
 
 
   @staticmethod
-  def merge(c1, c2, intersecting_clusters, min_volume):
+  def merge(c1, c2, intersecting_clusters=None, min_volume=0):
     """
     Computes the cluster after merging c1 and c2
 
@@ -205,7 +205,7 @@ class Cluster(object):
     weighed estimated error based on the intersecting clusters
     """
     if c1.cols != c2.cols:
-        raise RuntimeError("columns do not match!  %s vs %s" % (str(c1.cols), str(c2.cols)))
+      raise RuntimeError("columns do not match!  %s vs %s" % (str(c1.cols), str(c2.cols)))
     
     # Compute the new cluster
     newbbox = bounding_box(c1.bbox, c2.bbox)
@@ -215,19 +215,23 @@ class Cluster(object):
         discretes[k].update(c2.discretes.get(k, ()))
 
 
-    # compute new error
-    weights = []
-    errors = []
-    for intersection in intersecting_clusters:
-        bbox = intersection_box(intersection.bbox, newbbox)
-        weights.append(volume(bbox) or min_volume)
-        errors.append(intersection.error)
+    if not intersecting_clusters:
+      newerror = float('-inf')
+    else:
+      # compute new error
+      weights = []
+      errors = []
+      for intersection in intersecting_clusters:
+          bbox = intersection_box(intersection.bbox, newbbox)
+          weights.append(volume(bbox) or min_volume)
+          errors.append(intersection.error)
 
-    total_weight = sum(weights) or 1.
-    if not total_weight:
-        return None
+      total_weight = sum(weights) or 1.
+      if not total_weight:
+          return None
 
-    newerror = sum(e*w for e,w in zip(errors, weights)) / total_weight
+      newerror = sum(e*w for e,w in zip(errors, weights)) / total_weight
+
     return Cluster(newbbox, newerror, c1.cols, parents=(c1, c2), discretes=discretes)
 
 
@@ -260,11 +264,13 @@ class Cluster(object):
         mins.append(name_to_bounds[col][0])
         maxs.append(name_to_bounds[col][1])
         cont_cols.append(col)
-        
+
     bbox = (tuple(mins), tuple(maxs))
     error = error or rule.quality
     cluster = Cluster(bbox, error, cont_cols, parents=parents, discretes=discretes, npts=len(rule.examples))
     cluster.rule = rule
+    cluster.c_range = rule.c_range
+    cluster.inf_state = rule.inf_state
     return cluster
 
   def adjacent(self, o, thresh=0.7):

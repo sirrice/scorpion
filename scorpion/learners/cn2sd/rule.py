@@ -88,36 +88,36 @@ class SDRule(object) :
 
 
   def fill_in_rule(self, table, ref_bounds):
-      domain = table.domain
+    domain = table.domain
 
-      # if there are any cols not in the rule, fill them in with table bounds
-      conds = {}
-      for c in self.filter.conditions:
-          attr = domain[c.position]
-          name = attr.name
-          conds[name] = True
+    # if there are any cols not in the rule, fill them in with table bounds
+    conds = {}
+    for c in self.filter.conditions:
+      attr = domain[c.position]
+      name = attr.name
+      conds[name] = True
 
-      for col, bounds in ref_bounds.iteritems():
-          if col in conds:
-              continue
+    for col, bounds in ref_bounds.iteritems():
+      if col in conds:
+          continue
 
-          attr = domain[col]
-          pos = domain.index(attr)
+      attr = domain[col]
+      pos = domain.index(attr)
 
-          if bounds is None:
-              vals = range(len(attr.values))
-              vals = [orange.Value(attr, attr.values[v]) for v in vals]
-              cond = orange.ValueFilter_discrete(position=pos, values=vals)
-          else:
-              (minv, maxv) = bounds
-              
-              cond = orange.ValueFilter_continuous(
-                  position=pos,
-                  oper = orange.ValueFilter.Between,
-                  min = minv-1,
-                  max = maxv+1
-                  )
-          self.filter.conditions.append(cond)
+      if bounds is None:
+        vals = range(len(attr.values))
+        vals = [orange.Value(attr, attr.values[v]) for v in vals]
+        cond = orange.ValueFilter_discrete(position=pos, values=vals)
+      else:
+        (minv, maxv) = bounds
+        
+        cond = orange.ValueFilter_continuous(
+          position=pos,
+          oper = orange.ValueFilter.Between,
+          min = minv-1,
+          max = maxv+1
+        )
+      self.filter.conditions.append(cond)
 
 
   def cloneAndAppendRule(self, rule):
@@ -332,7 +332,7 @@ class SDRule(object) :
     cdists = cdists or Orange.statistics.basic.Domain(data)
     ddists = ddists or Orange.statistics.distribution.Domain(data)
     #scdists = Orange.statistics.basic.Domain(subset)
-    sddists = Orange.statistics.distribution.Domain(subset)
+    #sddists = Orange.statistics.distribution.Domain(subset)
 
     conds = []
     for old_cond, idx in zip(self.filter.conditions, positions):
@@ -342,14 +342,15 @@ class SDRule(object) :
       # filter down to the values that intersect the subset of data
       if attr.var_type == Orange.feature.Type.Discrete:
         full_d = ddists[attr.name]
-        sub_d = sddists[attr.name]
+        #sub_d = sddists[attr.name]
         fvals = [k for k,v in full_d.items() if v]
         cvals = set([str(attr.values[int(v)]) for v in old_cond.values])
         if len(cvals) == len(fvals):
           continue
 
-        dvals = [k for k,v in sub_d.items() if v]
-        vals = set(cvals).intersection(dvals)
+        #dvals = [k for k,v in sub_d.items() if v]
+        #vals = set(cvals).intersection(dvals)
+        vals = cvals
         cond = orange.ValueFilter_discrete(
           position = idx,
           values = [orange.Value(attr, val) for val in vals]
@@ -455,7 +456,7 @@ class SDRule(object) :
           max = d['vals'][1]
       )
 
-    # XXX: hack
+    # XXX: NULL hack
     attr = data.domain[d['col']]
     vals = []
     for v in d['vals']:
@@ -469,31 +470,31 @@ class SDRule(object) :
 
 
   def ruleToString(self):
-      domain = self.data.domain
-      ret = []
-      for i,c in enumerate(self.filter.conditions):
-          s = self.condToString(c)
-          if s:
-              ret.append(s)
+    domain = self.data.domain
+    ret = []
+    for i,c in enumerate(self.filter.conditions):
+      s = self.condToString(c)
+      if s:
+        ret.append(s)
 
-      ret.sort()
-      rule = ' and '.join(ret)
-      if self.filter.negate:
-          rule = '%s (Neg)' % rule
-      return '%.4f %d  %s' % ((self.quality or -inf), len(self.examples), rule)
+    ret.sort()
+    rule = ' and '.join(ret)
+    if self.filter.negate:
+      rule = '%s (Neg)' % rule
+    return '%.2f %d  %s' % ((self.quality or -inf), len(self.examples), rule)
 
   def toCondStrs(self):
-      domain = self.data.domain
-      ret = []
-      if self.filter.negate:
-        ret.append('neg')
+    domain = self.data.domain
+    ret = []
+    if self.filter.negate:
+      ret.append('neg')
 
-      for i,c in enumerate(self.filter.conditions):
-          s = self.condToString(c)
-          if s:
-              ret.append(s)
+    for i,c in enumerate(self.filter.conditions):
+      s = self.condToString(c)
+      if s:
+        ret.append(s)
 
-      return ret
+    return ret
   cond_strs = property(toCondStrs)
 
 
@@ -512,7 +513,8 @@ class SDRule(object) :
     return {
       'conds': self.toCondDicts(),
       'c_range': self.c_range,
-      'quality': self.quality
+      'quality': self.quality,
+      'inf_state': self.inf_state
     }
 
   @staticmethod
@@ -521,6 +523,7 @@ class SDRule(object) :
     rule = SDRule(data, None, conds, None)
     rule.c_range = j['c_range']
     rule.quality = j['quality']
+    rule.inf_state = j['inf_state']
     return rule
 
 

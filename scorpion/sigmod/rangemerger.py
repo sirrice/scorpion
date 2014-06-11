@@ -428,10 +428,9 @@ class RangeMerger(BaseRangeMerger):
 class RangeMerger2(BaseRangeMerger):
 
   def pick_expansion_vals(self, cluster, dim, direction, vals):
+    if len(vals) == 0: return vals
     if direction == 'disc': 
-      return vals
-      return vals[:5]
-    if not vals: return vals
+      return np.random.choice(vals, min(len(vals), 6), replace=False)
 
     vals = random.sample(vals, min(4, len(vals)))
     vals.sort(reverse=(direction == 'dec'))

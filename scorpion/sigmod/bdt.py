@@ -252,14 +252,14 @@ class BDT(Basic):
       bad_params.update({
         'SCORE_ID': self.SCORE_ID,
         'err_funcs': self.bad_err_funcs,
-        'max_wait': max_wait
+        'max_wait': max_wait * 2
       })
       good_params = dict(self.params)
       good_params.update(kwargs)
       good_params.update({
         'SCORE_ID': self.SCORE_ID,
         'err_funcs': self.good_err_funcs,
-        'max_wait': max_wait
+        'max_wait': max_wait * 2
       })
 
       if not self.parallel:

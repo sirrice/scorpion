@@ -227,7 +227,7 @@ class AdjacencyVersion(object):
 
   def search_rtree(self, cluster):
     self.setup_rtree(len(cluster.bbox[0]))
-    bbox = self.bbox_rtree(cluster, enlarge=0.005)
+    bbox = self.bbox_rtree(cluster, enlarge=0.01)
     return self._rtree.intersection(bbox)
     res = [self.clusters[idx] for idx in self._rtree.intersection(bbox)]
     return filter(bool, res)

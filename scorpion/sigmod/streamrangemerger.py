@@ -33,6 +33,13 @@ class StreamRangeMerger(RangeMerger2):
     # tracks the valid expansions for each frontier cluster
     self.valid_expansions = defaultdict(lambda: defaultdict(lambda: True))
 
+    # all values for each dimension
+    self.all_cont_vals = defaultdict(set) # idx -> values
+    self.all_disc_vals = defaultdict(set) # name -> values
+
+    # name -> { val -> # times failed }
+    self.failed_disc_vals = defaultdict(lambda: defaultdict(lambda:0))
+
     # stores the frontier after each iteration
     self.added = set()
     self.seen = set()
@@ -48,7 +55,7 @@ class StreamRangeMerger(RangeMerger2):
     all_inf = lambda l: all([abs(v) == float('inf') for v in l])
     clusters = filter(lambda c: c.bound_hash not in self.added, clusters)
     clusters = filter(lambda c: not all_inf(c.inf_state[0]), clusters)
-    clusters = filter(lambda c: not all_inf(c.inf_state[2]), clusters)
+    clusters = filter(lambda c: len(c.inf_state[2]) == 0 or not all_inf(c.inf_state[2]), clusters)
     self.added.update([c.bound_hash for c in clusters])
 
     super(StreamRangeMerger, self).setup_stats(clusters)
@@ -60,13 +67,26 @@ class StreamRangeMerger(RangeMerger2):
     self.adj_graph.sync()
     self.stats['adj_sync'][0] += time.time() - start
     self.stats['adj_sync'][1] += 1
+
+    for c in clusters:
+      for idx in xrange(len(c.cols)):
+        self.all_cont_vals[idx].add(c.bbox[0][idx])
+        self.all_cont_vals[idx].add(c.bbox[1][idx])
+      for disc, vals in c.discretes.iteritems():
+        if len(vals) < 3:
+          self.all_disc_vals[disc].update([(v,) for v in vals])
+        else:
+          self.all_disc_vals[disc].add(tuple(vals))
+
     return clusters
 
-  def best_so_far(self):
+  def best_so_far(self, prune=False):
     clusters = set()
     for frontier in self.frontiers:
       clusters.update(frontier.frontier)
-    return self.get_frontier(clusters)[0]
+    if prune:
+      return self.get_frontier(clusters)[0]
+    return clusters
 
 
   def add_clusters(self, clusters, idx=0):
@@ -95,14 +115,16 @@ class StreamRangeMerger(RangeMerger2):
       # remove non-frontier-based expansions from future expansion
       for tidx in self.tasks.keys():
         if tidx == 0: continue
-        checker = lambda c: any(map(base_frontier.__contains__, c.ancestors))
+        checker = lambda c: not any(map(base_frontier.__contains__, c.ancestors))
         self.tasks[tidx] = filter(checker, self.tasks[tidx])
 
+    if clusters:
+      _logger.debug("merger:\tadded %d clusters\t%d tasks left", len(clusters), self.ntasks)
     return clusters
 
   @property
   def ntasks(self):
-    if not self.tasks: return 0
+    if len(self.tasks) == 0: return 0
     return sum(map(len, self.tasks.values()))
 
   def has_next_task(self):
@@ -114,7 +136,8 @@ class StreamRangeMerger(RangeMerger2):
     for idx in reversed(self.tasks.keys()):
       tasks = self.tasks[idx]
       while len(ret) < n and tasks:
-        ret.append((idx, tasks.pop()))
+        idx = random.randint(0, len(tasks)-1)
+        ret.append((idx, tasks.pop(idx)))
     return ret
 
 
@@ -124,8 +147,6 @@ class StreamRangeMerger(RangeMerger2):
     Return any successfully expanded clusters (improvements)
     """
     self.add_clusters(clusters)
-    self.rejected_disc_vals = defaultdict(list)
-    self.rejected_cont_vals = defaultdict(set)
 
     nmerged = self.nmerged
     start = time.time()
@@ -139,85 +160,206 @@ class StreamRangeMerger(RangeMerger2):
       expanded = self.greedy_expansion(cluster, self.seen, idx, None)
       expanded = filter(self.valid_cluster_f, expanded)
 
-      expanded, _ = self.get_frontier_obj(idx).update(expanded)
-      frontier, rms = self.get_frontier_obj(idx+1).update(expanded)
-      improved_clusters = frontier.difference(set([cluster]))
+      cur_expanded, _ = self.get_frontier_obj(idx).update(expanded)
+      next_expanded, rms = self.get_frontier_obj(idx+1).update(cur_expanded)
+      improved_clusters = next_expanded.difference(set([cluster]))
+      for c in expanded:
+        _logger.debug("merger\texpanded\tcur_idx(%s)\tnext_idx(%s)\t%s", 
+            (cluster in cur_expanded), (cluster in next_expanded), 
+            c.rule.simplify())
+
       if not improved_clusters:
         continue
 
-      self.adj_graph.insert(frontier, version=idx+1)
+      #self.adj_graph.insert(next_expanded, version=idx+1)
       self.add_clusters(improved_clusters, idx+1)
       improvements.update(improved_clusters)
-    print "merger\ttook %.1f sec\t%d improved\t%d tried\t%d tasks left" % (time.time()-start, len(improvements), self.nmerged-nmerged,self.ntasks)
+    print "merger\ttook %.1f sec\t%d improved\t%d tried\t%d tasks left" % (time.time()-start, len(improvements), (self.nmerged-nmerged), self.ntasks)
     return improvements
 
-  def check_direction(self, valid_expansions, dim, direction):
-    return valid_expansions[(dim, direction)] 
+
+
+  @instrument
+  def dims_to_expand(self, cluster, seen, version=None):
+    for idx in xrange(len(cluster.cols)):
+      vals = np.array(list(self.all_cont_vals[idx]))
+      smaller = vals[(vals < cluster.bbox[0][idx])]
+      bigger =  vals[(vals > cluster.bbox[1][idx])]
+      yield idx, 'dec', smaller.tolist()
+      yield idx, 'inc', bigger.tolist()
+
+    for name, vals in cluster.discretes.iteritems():
+      ret = []
+      for disc_vals in self.all_disc_vals[name]:
+        subset = set(disc_vals).difference(vals)
+        subset.difference_update([v for v in subset if self.failed_disc_vals[name][str(v)] > 5])
+        ret.append(subset)
+      ret = filter(bool, ret)
+      ret.sort(key=len)
+      yield name, 'disc', ret
+
+    
+
+  def check_direction(self, cluster, dim, direction, vals):
+    key = cluster.bound_hash
+    if direction == 'disc':
+      for subset in self.rejected_disc_vals[dim]:
+        if subset.issubset(vals): return []
+    if direction == 'inc':
+      cont_vals = self.rejected_cont_vals[(dim, direction)]
+      if cont_vals:
+        vals = filter(lambda v: v > max(cont_vals), vals)
+    if direction == 'dec':
+      cont_vals = self.rejected_cont_vals[(dim, direction)]
+      if cont_vals:
+        vals = filter(lambda v: v < min(cont_vals), vals)
+    return vals
+
+    if not self.valid_expansions[key][(dim, direction)]: return False
+    if cluster.parents:
+      return self.check_direction(cluster.parents[0], dim, direction)
+    return True
   
-  def update_direction(self, valid_expansions, dim, direction, ok, vals):
-    valid_expansions[(dim, direction)] &= ok
-    # update rejection state
-    for v in vals:
-      if direction == 'disc':
-        self.rejected_disc_vals[dim].append(set(v))
-      if direction == 'inc':
-        #v = c.bbox[1][dim]
-        self.rejected_cont_vals[(dim, direction)].add(round(v, 1))
-      if direction == 'dec':
-        #v = c.bbox[0][dim]
-        self.rejected_cont_vals[(dim, direction)].add(round(v, 1))
- 
+  def update_direction(self, cluster, dim, direction, ok, val):
+    key = cluster.bound_hash
+    self.valid_expansions[key][(dim, direction)] &= ok
+
+    if direction == 'disc':
+      for v in list(val):
+        self.rejected_disc_vals[dim].append(set([v]))
+        self.failed_disc_vals[dim][str(v)] += 1
+    if direction == 'inc':
+      self.rejected_cont_vals[(dim, direction)].add(round(val, 1))
+    if direction == 'dec':
+      self.rejected_cont_vals[(dim, direction)].add(round(val, 1))
+
+
+
   @instrument
   def greedy_expansion(self, cluster, seen, version=None, frontier=None, valid_expansions=None):
-    _logger.debug("merger\tgreedy_expand\t%s", cluster)
+    _logger.debug("merger\tgreedy_expand\t%s", cluster.rule.simplify())
     if not valid_expansions:
+      self.rejected_disc_vals = defaultdict(list)
+      self.rejected_cont_vals = defaultdict(set)
       valid_expansions = defaultdict(lambda: True)
     if not frontier:
       frontier = ContinuousFrontier(self.c_range, 0.05)
-      #frontier.frontier = set(self.get_frontier_obj(version).frontier)
 
-    ret = set()
+    cols = cluster.cols
     for dim, direction, vals in self.dims_to_expand(cluster, seen, version=version):
-      attrname = isinstance(dim, basestring) and dim or cluster.cols[dim]
-      if not self.check_direction(valid_expansions, dim, direction):
-        _logger.debug("merger\tnoexpand\t%s\t%s", attrname[:15], direction)
-        continue
-
-      tmp = set()
+      attrname = isinstance(dim, basestring) and dim or cols[dim]
+      vals = self.check_direction(cluster, dim, direction, vals)
       realvals = self.pick_expansion_vals(cluster, dim, direction, vals)
+
       for v in realvals:
+        tmp = None
         if direction == 'inc':
-          tmp.add(self.dim_merge(cluster, dim, None, v, seen))
+          tmp = self.dim_merge(cluster, dim, None, v, seen)
         elif direction == 'dec':
-          tmp.add(self.dim_merge(cluster, dim, v, None, seen))
+          tmp = self.dim_merge(cluster, dim, v, None, seen)
         else:
-          tmp.add(self.disc_merge(cluster, dim, v))
-      tmp = filter(bool, tmp)
+          tmp = self.disc_merge(cluster, dim, v)
 
-      if direction == 'disc':
-        _logger.debug("merger\t%d cands \t%s\t%s", len(tmp), attrname[:15], direction)
-      else:
-        fmt = lambda v: '%.1f'%v
-        _logger.debug("merger\t%d cands \t%s\t%s\t%s -> %s", 
-            len(tmp), attrname[:15], direction, 
-            str(map(fmt, vals)), str(map(fmt, realvals)))
-      if not tmp:
-        continue
+        if not tmp: 
+          _logger.debug("merger\tnoexpand\t%s\t%s\t%s options", attrname[:15], direction, len(vals))
+          continue
 
-      cluster.c_range = list(self.c_range)
-      expanded, _ = frontier.update(tmp)
-      seen.update([c.bound_hash for c in _])
-      _logger.debug("merger\t%d improved", len(expanded))
+        expanded, _ = frontier.update([tmp])
+        _logger.debug("merger\tcand\t%s\t%s\t%s\t%s", attrname[:15], direction, bool(expanded), v)
+ 
+        if not expanded:
+          seen.add(tmp.bound_hash)
+          self.update_direction(cluster, dim, direction, True, v)
+          if direction != 'disc':
+            break
 
-      self.update_direction(valid_expansions, dim, direction, bool(expanded), realvals)
-      ret.difference_update(_)
-      ret.update(expanded)
+        cluster = tmp
 
-      for c in expanded:
-        copy = defaultdict(lambda: True)
-        copy.update(valid_expansions)
-        ret.update(self.greedy_expansion(c, seen, version, frontier, copy))
+    for c in frontier.frontier:
+      c.c_range = list(self.c_range)
+    return frontier.frontier
+
+
+
+
+  """
+  def n_clauses(self, cluster):
+    n = 0
+    for idx, col in enumerate(cluster.cols):
+      dist = self.learner.cont_dists[col]
+      dbound = [dist.min, dist.max]
+      cbound = [cluster.bbox[0][idx], cluster.bbox[1][idx]]
+      if r_vol(r_intersect(cbound, dbound)) < r_vol(dbound):
+        n += 1
+
+    for col, vals in cluster.discretes.iteritems():
+      dist = self.disc_dists[col]
+      if len(vals) < len(dist.values):
+        n += 1
+    return n
+
+  @instrument
+  def greedy_expansion2(self, cluster, seen, version=None, frontier=None, valid_expansions=None):
+    def check(n):
+      return not(
+        (seen and n.bound_hash in seen) or 
+        (n==cluster) or 
+        cluster.same(n, epsilon=0.01) or 
+        sum(cluster.inf_state[1]) == 0 or
+        any([abs(v) == float('inf') for v in cluster.inf_state[0]]) or
+        cluster.contains(n) 
+      )
+    ret = []
+
+    neighbors = self.adj_graph.neighbors(cluster)#, version=version)
+    neighbors = filter(check, neighbors)
+    xs = ((np.arange(20) / 20.) * r_vol(self.c_range)) + self.c_range[0]
+    merged = [Cluster.merge(cluster, n, [], 0) for n in neighbors]
+    merged.sort(key=lambda m: abs(self.n_clauses(m) - self.n_clauses(cluster)))
+    print "%d neigh\t%s" % (len(neighbors), cluster.rule.simplify())
+    for c in merged[:8]:
+      c.to_rule(self.learner.full_table)
+      c.error = self.influence(c)
+      c.c_range = list(self.c_range)
+      c.inf_func = self.learner.create_inf_func(c)
+      ret.append(c)
+      print '\t%s' % c.rule.simplify()
     return ret
 
+
+
+
+
+
+    if neighbors > 8:
+      xs = ((np.arange(20) / 20.) * r_vol(self.c_range)) + self.c_range[0]
+      nconds = np.array([1+abs(self.n_clauses(n)-self.n_clauses(cluster)) for n in neighbors])
+      nconds = nconds ** 2
+      weights = np.array([np.percentile(n.inf_func(xs), 55) for n in neighbors])
+      weights /= nconds
+      weights -= weights.min()
+      weights += weights.sum() * 0.05
+      if weights.sum() == 0: 
+        return []
+      weights /= weights.sum()
+      neighbors = np.random.choice(neighbors, 8, p=weights, replace=False)
+
+    ret = []
+    print "%d neigh\t%s" % (len(neighbors), cluster.rule.simplify())
+    for n in neighbors:
+      seen.add(n.bound_hash)
+      self.nmerged += 1
+      c = Cluster.merge(cluster, n, [], 0)
+      if self.n_clauses(c) == 0:
+        continue
+      c.to_rule(self.learner.full_table)
+      c.error = self.influence(c)
+      c.c_range = list(self.c_range)
+      c.inf_func = self.learner.create_inf_func(c)
+      ret.append(c)
+      print '\t%s' % n.rule.simplify()
+      print '\t%s' % c.rule.simplify()
+    return ret
+  """
 
 

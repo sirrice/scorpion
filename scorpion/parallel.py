@@ -126,10 +126,14 @@ def rules_to_clusters(rules, learner):
     cols=learner.cols, 
     cont_dists=learner.cont_dists
   )
+
   for r in rules:
     c = Cluster.from_rule(r, learner.cols)
-    learner.influence_cluster(c)
-    c.c_range = list(learner.c_range)
+
+    if not c.inf_state:
+      learner.influence_cluster(c)
+    if not r.c_range or abs(r.c_range[0]) == float('inf'):
+      c.c_range = list(learner.c_range)
     c.inf_func = learner.create_inf_func(c)
     clusters.append(c)
   return clusters
@@ -200,23 +204,25 @@ def serial_hybrid(obj, aggerr, **kwargs):
     })
     merger = StreamRangeMerger(**mparams)
 
+    allrules = []
     for rules in learner(all_full_table, bad_tables, good_tables):
-      clusters = rules_to_clusters(rules, learner)
-      merger.add_clusters(clusters)
-      learner.update_rules(
-        aggerr.agg.shortname, 
-        group_clusters(merger.best_so_far(), learner)
-      )
-      merger()
-
+      allrules.extend(rules)
+    clusters = rules_to_clusters(allrules, learner)
+    pdb.set_trace()
+    merger.add_clusters(clusters)
+    learner.update_rules(
+      aggerr.agg.shortname, 
+      group_clusters(merger.best_so_far(), learner)
+    )
     learner.update_status("waiting for merging step to finish")
+
     while merger.has_next_task():
       merger()
       learner.update_rules(
         aggerr.agg.shortname, 
         group_clusters(merger.best_so_far(), learner)
       )
-    clusters = merger.best_so_far()
+    clusters = merger.best_so_far(True)
 
   costs['rules_get'] = time.time() - start
 
@@ -261,13 +267,14 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   THRESHOLD = 0.01
   threshold = THRESHOLD * np.median([ef.value for ef in learner.bad_err_funcs])
   valid_cluster_f = lambda c: c.inf_state[0] and max(c.inf_state[0]) > threshold
+  valid_cluster_f = lambda c: True
 
   params = dict(params)
   params.update({
     'learner_hash': hash(learner),
     'learner' : learner,
     'partitions_complete': False,
-    'valid_cluster_f': valid_cluster_f #lambda c: True
+    'valid_cluster_f': valid_cluster_f 
   })
   merger = StreamRangeMerger(**params)
 
@@ -325,9 +332,12 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   _logger.debug("merger\texited loop")
 
 
-  if not merged:
-    merged = merger.best_so_far()
-  _logger.debug("merger\tsending %d results back" % len(merged))
+  merged = merger.best_so_far(True)
+  _logger.debug("merger\tsending %d results back", len(merged))
+  #for c in merged:
+  #  c.rule.c_range = c.c_range
+  #  c.rule.inf_state = c.inf_state
+  #  _logger.debug("merger\tsending result\t%s", c)
   out_conn.put([c.rule.to_json() for c in merged])
   in_conn.close()
   out_conn.close()
@@ -360,7 +370,7 @@ def group_clusters(clusters, learner):
   non_children = filter(validf, non_children)
 
   groups = []
-  for key, group in group_by_inf_state(non_children).iteritems():
+  for key, group in group_by_inf_state(non_children, learner).iteritems():
     subgroups = group_by_tuple_ids(group)
     subgroup = filter(bool, map(merge_clauses, subgroups.values()))
     groups.append(subgroup)
@@ -393,10 +403,8 @@ def filter_useless_clusters(clusters, learner):
   threshold = THRESHOLD * mean_val
 
   f = lambda c: c.inf_state[0] and max(c.inf_state[0]) > threshold
-  for c in clusters:
-    if not f(c):
-      print "useless cluster: %s" % c
-  return filter(f, clusters)
+  h = lambda c: r_vol(c.c_range)
+  return filter(h, filter(f, clusters))
 
 def merge_clauses(clusters):
   """
@@ -443,12 +451,18 @@ def group_to_rule(clusters):
   return rule
 
 
-def group_by_inf_state(clusters):
+def group_by_inf_state(clusters, learner):
   """
   super stupid check to group rules that have 
   identical influence states
   """
-  f = lambda cluster: tuple(map(tuple, cluster.inf_state))
+  mean_val = np.median([ef.value for ef in learner.bad_err_funcs])
+  block = mean_val / 10.
+  trunc = lambda v: int(float(v)/block)
+
+  def f(c):
+    l = [map(trunc, c.inf_state[0]), map(trunc, c.inf_state[2])]
+    return tuple(map(tuple, l))
   return group_by_features(clusters, f)
 
 def group_by_tuple_ids(clusters):

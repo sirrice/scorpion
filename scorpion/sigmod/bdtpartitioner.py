@@ -160,6 +160,7 @@ class BDTTablesPartitioner(Basic):
         leaf.parent = None
         #self.grow(leaf, self.tables, self.samp_rates, all_infs)
         for n in self.grow(leaf, samples, self.samp_rates, all_infs):
+          _logger.debug("yield:\t%s", str(n))
           yield n
         leaf.parent = parent
 
@@ -472,12 +473,12 @@ class BDTTablesPartitioner(Basic):
       node.score = min(scores) 
       minscore = curscore - abs(curscore) * self.min_improvement
       if node.score >= minscore and minscore != -inf:
-        _logger.debug("score didn't improve\t%.7f >= %.7f", min(scores), minscore)
+        _logger.debug("bdt:  \tscore didn't improve\t%.7f >= %.7f", min(scores), minscore)
         yield node
         return
 
       if node.score <= curscore - abs(curscore) * 0.05:
-        _logger.debug("good:\tbig improvement\t%s", str(new_rules[0]))
+        _logger.debug("bdt:  \tbig improvement\t%s", str(new_rules[0]))
         yield node
 
       ncands = max(1, 2 - node.depth)
