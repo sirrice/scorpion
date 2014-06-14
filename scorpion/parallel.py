@@ -458,7 +458,10 @@ def group_by_inf_state(clusters, learner):
   """
   mean_val = np.median([ef.value for ef in learner.bad_err_funcs])
   block = mean_val / 10.
-  trunc = lambda v: int(float(v)/block)
+  def trunc(v):
+    if abs(v) == float('inf'):
+      return float('inf')
+    return int(float(v) / block)
 
   def f(c):
     l = [map(trunc, c.inf_state[0]), map(trunc, c.inf_state[2])]
