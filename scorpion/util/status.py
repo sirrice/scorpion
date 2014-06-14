@@ -1,6 +1,5 @@
 import json
 from sqlalchemy import create_engine
-from scorpion.learners.cn2sd.rule import rule_to_json
 
 class Status(object):
   def __init__(self, reqid=None):
@@ -66,6 +65,7 @@ class Status(object):
         select 1 from rules where reqid=%s and label = %s
       );
     """
+    from scorpion.learners.cn2sd.rule import rule_to_json
     jsons = []
     for rule in rules:
       if isinstance(rule, dict):

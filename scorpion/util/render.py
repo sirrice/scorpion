@@ -139,6 +139,8 @@ class InfRenderer(BaseRenderer):
       ys = map(c.inf_func, xs)
       self.sub.plot(xs, ys, color=color, alpha=alpha)
 
+      ys = filter(lambda v: abs(v) != float('inf'), ys)
+      if not ys: continue
       if not self.ybound:
         self.xbound = c.c_range
         self.ybound = [ min(ys), max(ys) ]
@@ -167,6 +169,8 @@ class InfRenderer(BaseRenderer):
       ys = map(c.inf_func, xs)
       self.sub.plot(xs, ys, color=color, alpha=alpha)
 
+      ys = filter(lambda v: abs(v) != float('inf'), ys)
+      if not ys: continue
       if not self.ybound:
         self.xbound = c_range
         self.ybound = [ min(ys), max(ys) ]

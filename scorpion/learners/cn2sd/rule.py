@@ -511,15 +511,19 @@ class SDRule(object) :
 
   def to_json(self):
     return {
-      'conds': self.toCondDicts(),
+      #'conds': self.toCondDicts(),
+      'clauses': self.toCondDicts(),
+      'count': len(self.examples),
       'c_range': self.c_range,
       'quality': self.quality,
-      'inf_state': self.inf_state
+      'score': self.quality,
+      'inf_state': self.inf_state,
+      'alt_rules': [r.cond_dicts for r in self.cluster_rules]
     }
 
   @staticmethod
   def from_json(j, data=None):
-    conds = [SDRule.dictToCond(d, data) for d in j['conds']]
+    conds = [SDRule.dictToCond(d, data) for d in j['clauses']]
     rule = SDRule(data, None, conds, None)
     rule.c_range = j['c_range']
     rule.quality = j['quality']
@@ -626,27 +630,16 @@ def rule_to_json(rule, **kwargs):
   Returns
     JSON object
   """
-  clause_parts = rule.toCondDicts()
-  alt_rules = []
-  if hasattr(rule, 'cluster_rules'):
-    for r in rule.cluster_rules:
-      dicts = r.toCondDicts()
-      alt_rules.append(dicts)
-
   def rnd(v):
     if v == float('-inf'): return -1e100
     if v == float('inf'): return 1e100
     return round(v, 3)
 
-  result = dict(kwargs)
-  result.update({
-    'count': len(rule.examples),
-    'score': rnd(rule.quality),
-    'c_range': map(rnd, rule.c_range),
-    'clauses': clause_parts,
-    'alt_rules': alt_rules
-  })
-  return result
+  ret = rule.to_json()
+  ret['c_range'] = map(rnd, ret['c_range'])
+  ret['score'] = rnd(ret['score'])
+  ret['quality'] = rnd(ret['quality'])
+  return ret
 
 
 def fill_in_rules(rules, table, cols=None, cont_dists=None):

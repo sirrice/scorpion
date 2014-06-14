@@ -161,7 +161,7 @@ def is_discrete(attr, col):
     'epochid', 'voltage', 'xloc', 'yloc', 
     'est', 'height', 'width', 'atime', 'v',
     'light', 'humidity', 'age', 
-    'finan_icu_days', 'dxage', 'job_count']:
+    'finan_icu_days', 'dxage', 'job_count', 'b']:
       return False
   if attr in ['recipient_zip', 'sensor', 'moteid' 'file_num']:
       return True

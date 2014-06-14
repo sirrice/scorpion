@@ -2,6 +2,7 @@
 # numerous helper methods for comparing influence dominance
 # between predicates across a range of c (lambda in job talk)
 # values
+#
 # 
 
 import json
@@ -35,6 +36,9 @@ class Frontier(object):
       swap at intersection point
       find intersection points with all other clusters
       pick next intersection point, add to heap
+
+  NOTE: picks _at most one_ function on the frontier, not _all_
+        functions on the frontier
   """
   def __init__(self, c_range, min_granularity=0):
     """
@@ -245,6 +249,10 @@ class ContinuousFrontier(Frontier):
     self.frontier.difference_update(rms)
     self.frontier.update(new_clusters)
     self.seen.update([c.bound_hash for c in clusters])
+
+    adds_hashes = set([c.bound_hash for c in adds])
+    adds = [c for c in self.frontier if c.bound_hash in adds_hashes]
+    adds = set(adds)
     return adds, rms
 
 
@@ -252,8 +260,6 @@ class ContinuousFrontier(Frontier):
   def probe(self, clusters):
     """
     merge clusters in argument with existing frontier
-
-    Return (removed_clusters, added_clusters)
     """
     new_spans = []
     beaten_counts = defaultdict(lambda: 0)
@@ -294,7 +300,6 @@ class ContinuousFrontier(Frontier):
       else:
         new_spans.extend(c_new_spans)
 
-    safe_frontier = set([c for c, n in beaten_counts.iteritems() if n == 0])
     rms = set([c for c, n in beaten_counts.iteritems() if n > 0])
     new_spans = filter(lambda s: s[2] > s[1], new_spans)
     new_spans = filter(lambda s: s[0] in arg_frontier or s[0] in rms, new_spans)

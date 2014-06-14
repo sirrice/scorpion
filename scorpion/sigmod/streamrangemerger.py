@@ -46,6 +46,14 @@ class StreamRangeMerger(RangeMerger2):
     self.frontiers = []
     self.adj_graph = None
 
+
+    if self.DEBUG:
+      self.renderer = InfRenderer('/tmp/merger.pdf', c_range=self.c_range)
+
+  def close(self):
+    if self.DEBUG:
+      self.renderer.close()
+
   def get_frontier_obj(self, version):
     while version >= len(self.frontiers):
       self.frontiers.append(ContinuousFrontier(self.c_range, 0.05))
@@ -85,7 +93,12 @@ class StreamRangeMerger(RangeMerger2):
     for frontier in self.frontiers:
       clusters.update(frontier.frontier)
     if prune:
-      return self.get_frontier(clusters)[0]
+      clusters = self.get_frontier(clusters)[0]
+
+    if self.DEBUG:
+      self.renderer.new_page()
+      self.renderer.set_title('best so far')
+      self.renderer.plot_active_inf_curves(clusters)
     return clusters
 
 
@@ -98,6 +111,11 @@ class StreamRangeMerger(RangeMerger2):
     if self.DEBUG:
       print "add_clusters"
       self.print_clusters(clusters)
+      self.renderer.new_page()
+      self.renderer.set_title("add_clusters %d clusters" % len(clusters))
+      for f in self.frontiers:
+        self.renderer.plot_inf_curves(f.frontier, color='grey') 
+      self.renderer.plot_inf_curves(clusters, color='green')
 
     clusters = self.setup_stats(clusters)
     base_frontier = self.get_frontier_obj(idx)
@@ -106,6 +124,7 @@ class StreamRangeMerger(RangeMerger2):
     if self.DEBUG:
       print "base_frontier"
       self.print_clusters(clusters)
+      self.renderer.plot_active_inf_curves(clusters, color='red')
 
     # clear out current tasks
     self.tasks[idx] = filter(base_frontier.__contains__, self.tasks[idx])
@@ -148,6 +167,8 @@ class StreamRangeMerger(RangeMerger2):
     """
     self.add_clusters(clusters)
 
+    to_hash = lambda cs: set([c.bound_hash for c in cs])
+
     nmerged = self.nmerged
     start = time.time()
     tasks = self.next_tasks(n)
@@ -157,22 +178,43 @@ class StreamRangeMerger(RangeMerger2):
         print "merger\tbelow thresh skipping\t %s" % cluster
         continue
 
-      expanded = self.greedy_expansion(cluster, self.seen, idx, None)
-      expanded = filter(self.valid_cluster_f, expanded)
+      if self.DEBUG:
+        self.renderer.new_page()
+        self.renderer.set_title("expand %s" % str(cluster.rule))
+        self.renderer.plot_inf_curves([cluster], color='grey') 
 
-      cur_expanded, _ = self.get_frontier_obj(idx).update(expanded)
-      next_expanded, rms = self.get_frontier_obj(idx+1).update(cur_expanded)
-      improved_clusters = next_expanded.difference(set([cluster]))
-      for c in expanded:
-        _logger.debug("merger\texpanded\tcur_idx(%s)\tnext_idx(%s)\t%s", 
-            (cluster in cur_expanded), (cluster in next_expanded), 
+      expanded = self.greedy_expansion(cluster, self.seen, idx, None)
+      expanded = [c for c in expanded if c.bound_hash != cluster.bound_hash]
+      exp_bounds = to_hash(expanded)
+
+      if self.DEBUG:
+        self.renderer.plot_inf_curves(expanded, color='green')
+
+      cur_expanded, rms = self.get_frontier_obj(idx).update(expanded)
+      next_expanded, rms2 = self.get_frontier_obj(idx+1).update(cur_expanded)
+      cur_bounds = to_hash(cur_expanded)
+      next_bounds = to_hash(next_expanded)
+
+      f = lambda c: c.bound_hash != cluster.bound_hash
+      improved_clusters = set(filter(f, next_expanded))
+      for c in chain(cur_expanded, rms):
+        _logger.debug("merger\texpanded\tcur_idx(%s)\tnext_idx(%s)\t%.3f-%.3f\t%s", 
+            (c.bound_hash in exp_bounds), 
+            (c.bound_hash in next_bounds), 
+            c.c_range[0], c.c_range[1],
             c.rule.simplify())
+      if self.DEBUG:
+        self.renderer.plot_active_inf_curves(self.get_frontier_obj(idx).frontier, color='blue')
+        self.renderer.plot_active_inf_curves(self.get_frontier_obj(idx+1).frontier, color='red')
 
       if not improved_clusters:
         continue
 
       #self.adj_graph.insert(next_expanded, version=idx+1)
+      debug = self.DEBUG
+      self.DEBUG = False
       self.add_clusters(improved_clusters, idx+1)
+      self.DEBUG = debug
       improvements.update(improved_clusters)
     print "merger\ttook %.1f sec\t%d improved\t%d tried\t%d tasks left" % (time.time()-start, len(improvements), (self.nmerged-nmerged), self.ntasks)
     return improvements
@@ -244,6 +286,7 @@ class StreamRangeMerger(RangeMerger2):
       valid_expansions = defaultdict(lambda: True)
     if not frontier:
       frontier = ContinuousFrontier(self.c_range, 0.05)
+      frontier.update([cluster])
 
     cols = cluster.cols
     for dim, direction, vals in self.dims_to_expand(cluster, seen, version=version):
@@ -279,87 +322,5 @@ class StreamRangeMerger(RangeMerger2):
       c.c_range = list(self.c_range)
     return frontier.frontier
 
-
-
-
-  """
-  def n_clauses(self, cluster):
-    n = 0
-    for idx, col in enumerate(cluster.cols):
-      dist = self.learner.cont_dists[col]
-      dbound = [dist.min, dist.max]
-      cbound = [cluster.bbox[0][idx], cluster.bbox[1][idx]]
-      if r_vol(r_intersect(cbound, dbound)) < r_vol(dbound):
-        n += 1
-
-    for col, vals in cluster.discretes.iteritems():
-      dist = self.disc_dists[col]
-      if len(vals) < len(dist.values):
-        n += 1
-    return n
-
-  @instrument
-  def greedy_expansion2(self, cluster, seen, version=None, frontier=None, valid_expansions=None):
-    def check(n):
-      return not(
-        (seen and n.bound_hash in seen) or 
-        (n==cluster) or 
-        cluster.same(n, epsilon=0.01) or 
-        sum(cluster.inf_state[1]) == 0 or
-        any([abs(v) == float('inf') for v in cluster.inf_state[0]]) or
-        cluster.contains(n) 
-      )
-    ret = []
-
-    neighbors = self.adj_graph.neighbors(cluster)#, version=version)
-    neighbors = filter(check, neighbors)
-    xs = ((np.arange(20) / 20.) * r_vol(self.c_range)) + self.c_range[0]
-    merged = [Cluster.merge(cluster, n, [], 0) for n in neighbors]
-    merged.sort(key=lambda m: abs(self.n_clauses(m) - self.n_clauses(cluster)))
-    print "%d neigh\t%s" % (len(neighbors), cluster.rule.simplify())
-    for c in merged[:8]:
-      c.to_rule(self.learner.full_table)
-      c.error = self.influence(c)
-      c.c_range = list(self.c_range)
-      c.inf_func = self.learner.create_inf_func(c)
-      ret.append(c)
-      print '\t%s' % c.rule.simplify()
-    return ret
-
-
-
-
-
-
-    if neighbors > 8:
-      xs = ((np.arange(20) / 20.) * r_vol(self.c_range)) + self.c_range[0]
-      nconds = np.array([1+abs(self.n_clauses(n)-self.n_clauses(cluster)) for n in neighbors])
-      nconds = nconds ** 2
-      weights = np.array([np.percentile(n.inf_func(xs), 55) for n in neighbors])
-      weights /= nconds
-      weights -= weights.min()
-      weights += weights.sum() * 0.05
-      if weights.sum() == 0: 
-        return []
-      weights /= weights.sum()
-      neighbors = np.random.choice(neighbors, 8, p=weights, replace=False)
-
-    ret = []
-    print "%d neigh\t%s" % (len(neighbors), cluster.rule.simplify())
-    for n in neighbors:
-      seen.add(n.bound_hash)
-      self.nmerged += 1
-      c = Cluster.merge(cluster, n, [], 0)
-      if self.n_clauses(c) == 0:
-        continue
-      c.to_rule(self.learner.full_table)
-      c.error = self.influence(c)
-      c.c_range = list(self.c_range)
-      c.inf_func = self.learner.create_inf_func(c)
-      ret.append(c)
-      print '\t%s' % n.rule.simplify()
-      print '\t%s' % c.rule.simplify()
-    return ret
-  """
 
 

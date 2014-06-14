@@ -95,7 +95,6 @@ def load_tables(obj, aggerr, **kwargs):
   start = time.time()
 
   # "id" column is special so we need to deal with it specially
-  pdb.set_trace()
   cols = valid_table_cols(bad_tables[0], aggerr.agg.cols, kwargs)
   all_cols = cols + aggerr.agg.cols        
   if 'id' not in all_cols:
@@ -209,7 +208,6 @@ def serial_hybrid(obj, aggerr, **kwargs):
     for rules in learner(all_full_table, bad_tables, good_tables):
       allrules.extend(rules)
     clusters = rules_to_clusters(allrules, learner)
-    pdb.set_trace()
     merger.add_clusters(clusters)
     learner.update_rules(
       aggerr.agg.shortname, 
@@ -224,6 +222,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
         group_clusters(merger.best_so_far(), learner)
       )
     clusters = merger.best_so_far(True)
+    merger.close()
 
   costs['rules_get'] = time.time() - start
 
@@ -334,6 +333,7 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
 
 
   merged = merger.best_so_far(True)
+  merger.close()
   _logger.debug("merger\tsending %d results back", len(merged))
   #for c in merged:
   #  c.rule.c_range = c.c_range
@@ -397,7 +397,7 @@ def get_hierarchies(clusters):
         child2parent[c1] = c2
   return child2parent
 
-def sort_rules(clusters, learner):
+def sort_rules(rules, learner):
   """
   if cluster doesn't affect outliers enough (in absolute terms),
   then throw it away
@@ -415,9 +415,6 @@ def sort_rules(clusters, learner):
 
   rules = sorted(rules, key=f, reverse=True)
   return rules
-
-
-  return filter(h, filter(f, clusters))
 
 def merge_clauses(clusters):
   """

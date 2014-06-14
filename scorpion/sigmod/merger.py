@@ -81,6 +81,10 @@ class Merger(object):
         else:
             self.point_volume = vols.min() / 2.
 
+    def close(self):
+      """teardown code"""
+      pass
+
 
     def setup_errors(self, clusters):
         return
