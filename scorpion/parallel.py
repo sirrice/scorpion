@@ -349,6 +349,8 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
 
 
 
+
+
 def group_clusters(clusters, learner):
   """
   filter subsumed rules (clusters) and group them by
@@ -365,7 +367,7 @@ def group_clusters(clusters, learner):
     if c not in child2parent:
       non_children.append(c)
 
-  non_children = filter_useless_clusters(non_children, learner)
+  #non_children = filter_useless_clusters(non_children, learner)
   validf = lambda c: valid_number(c.c_range[0]) and valid_number(c.c_range[1])
   non_children = filter(validf, non_children)
 
@@ -376,7 +378,7 @@ def group_clusters(clusters, learner):
     groups.append(subgroup)
 
   rules = filter(bool, map(group_to_rule, groups))
-  rules.sort(key=lambda r: r.c_range[0])
+  rules = sort_rules(rules, learner)
   return rules
 
 def get_hierarchies(clusters):
@@ -393,7 +395,7 @@ def get_hierarchies(clusters):
         child2parent[c1] = c2
   return child2parent
 
-def filter_useless_clusters(clusters, learner):
+def sort_rules(clusters, learner):
   """
   if cluster doesn't affect outliers enough (in absolute terms),
   then throw it away
@@ -402,8 +404,17 @@ def filter_useless_clusters(clusters, learner):
   mean_val = np.median([ef.value for ef in learner.bad_err_funcs])
   threshold = THRESHOLD * mean_val
 
-  f = lambda c: c.inf_state[0] and max(c.inf_state[0]) > threshold
+  def f(c):
+    infs = filter(lambda v: abs(v) != float('inf'), c.inf_state[0])
+    if not infs:
+      return -1e10
+    return max(infs) - threshold
   h = lambda c: r_vol(c.c_range)
+
+  rules = sorted(rules, key=f, reverse=True)
+  return rules
+
+
   return filter(h, filter(f, clusters))
 
 def merge_clauses(clusters):
@@ -460,12 +471,13 @@ def group_by_inf_state(clusters, learner):
   block = mean_val / 10.
   def trunc(v):
     if abs(v) == float('inf'):
-      return float('inf')
+      return 'inf'
     return int(float(v) / block)
 
   def f(c):
-    l = [map(trunc, c.inf_state[0]), map(trunc, c.inf_state[2])]
-    return tuple(map(tuple, l))
+    bad_infs =  tuple(map(trunc, c.inf_state[0]))
+    good_infs = tuple(map(trunc, c.inf_state[2]))
+    return (bad_infs, good_infs)
   return group_by_features(clusters, f)
 
 def group_by_tuple_ids(clusters):
