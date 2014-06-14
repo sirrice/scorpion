@@ -361,15 +361,16 @@ def group_clusters(clusters, learner):
   """
   # find hierarchy relationships
   child2parent = get_hierarchies(clusters)
+  validf = lambda c: valid_number(c.c_range[0]) and valid_number(c.c_range[1])
 
   non_children = []
   for c in clusters:
-    if c not in child2parent:
+    if c in child2parent:
+      _logger.debug("groupclust\trm child cluster\t%s", c)
+    elif not validf(c):
+      _logger.debug("groupclust\tc_range invalid \t%s", c)
+    else:
       non_children.append(c)
-
-  #non_children = filter_useless_clusters(non_children, learner)
-  validf = lambda c: valid_number(c.c_range[0]) and valid_number(c.c_range[1])
-  non_children = filter(validf, non_children)
 
   groups = []
   for key, group in group_by_inf_state(non_children, learner).iteritems():
@@ -422,7 +423,9 @@ def merge_clauses(clusters):
   assuming the clusters match the same input records, combine their clauses
   into a single cluster
   """
-  if len(clusters) == 0: return None
+  if len(clusters) == 0: 
+    _logger.debug("groupclust\tmerge_clauses\t%d clusters", len(clusters))
+    return None
   if len(clusters) == 1: 
     clusters[0].rule.c_range = clusters[0].c_range
     return clusters[0]
@@ -452,7 +455,9 @@ def group_to_rule(clusters):
   pick a representative cluster from the arguments and 
   return a single one
   """
+  _logger.debug("groupclust\tgroup->rule\t%d clusters", len(clusters))
   if len(clusters) == 0: return None
+
   clusters = sorted(clusters, key=lambda c: r_vol(c.c_range), reverse=True)
   rule = clusters[0].rule
   rule.c_range = list(clusters[0].c_range)
