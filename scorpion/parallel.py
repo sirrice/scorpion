@@ -95,6 +95,7 @@ def load_tables(obj, aggerr, **kwargs):
   start = time.time()
 
   # "id" column is special so we need to deal with it specially
+  pdb.set_trace()
   cols = valid_table_cols(bad_tables[0], aggerr.agg.cols, kwargs)
   all_cols = cols + aggerr.agg.cols        
   if 'id' not in all_cols:

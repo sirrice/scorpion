@@ -3,6 +3,7 @@ import pdb
 import psycopg2
 
 from sqlalchemy import create_engine
+from sqlalchemy.pool import NullPool
 from datetime import datetime, date, timedelta
 from datetime import time as dttime
 from collections import deque, defaultdict
@@ -20,7 +21,7 @@ def connect(dbname, engine='pg'):
         db = msql.connect(user='monetdb', password='monetdb', hostname='localhost', database=dbname)
       else:
         conn = "postgresql://localhost/%s" % dbname
-        db = create_engine(conn)
+        db = create_engine(conn, poolclass=NullPool)
         #connection = "dbname='%s' user='sirrice' host='localhost' port='5432'" % (dbname)
         #db = psycopg2.connect(connection)
     except:
