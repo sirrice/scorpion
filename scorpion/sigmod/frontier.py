@@ -18,7 +18,7 @@ sys.path.extend(['.', '..'])
 
 from scorpion.util import *
 
-
+INF = float('inf')
 
 
 class Frontier(object):
@@ -357,7 +357,7 @@ class CheapFrontier(Frontier):
   @instrument
   def cluster_infs(self, c):
     infs = c.inf_func(self.buckets)
-    infs[(infs == float('inf')) | (infs == float('-inf'))] = -1
+    infs[np.abs(infs) == INF] = -1
     return infs
 
   @instrument
@@ -424,14 +424,14 @@ class CheapFrontier(Frontier):
         if sidx is not None:
           start = self.buckets[sidx]
           end = self.buckets[bidx-1] + self.blocksize
-          print '%.2f-%.2f\t%s' % (start, end, cluster.rule)
+          #print '%.2f-%.2f\t%s' % (start, end, cluster.rule)
           ret.append((cluster, start, end))
           sidx = None
 
     if sidx is not None:
       start = self.buckets[sidx]
       end = self.c_range[1]
-      print '%.2f-%.2f\t%s' % (start, end, cluster.rule)
+      #print '%.2f-%.2f\t%s' % (start, end, cluster.rule)
       ret.append((cluster, self.buckets[sidx], self.c_range[1]))
     return ret
 

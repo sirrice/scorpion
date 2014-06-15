@@ -14,11 +14,12 @@ def compute_bad_score(bds, bcs, c, smooth=0.015):
 
   topbots = zip(bds, bcs)
   binfs = [compute_bad_inf(top, bot, c) for top, bot in topbots]
-  binfs = np.array(binfs)#.transpose()
+  binfs = np.array(binfs)
 
-  bcs = [(bc > 0) and 1 or smooth for bc in bcs]
-  total = float(sum(bcs))
-  weights = [bc/total for bc in bcs]
+  bcs = np.array(bcs)
+  bcs[bcs > 0] = 1
+  bcs[bcs <= 0] = smooth
+  weights = bcs / bcs.sum()
   try:
     return np.average(binfs, axis=0, weights=weights)
   except:
