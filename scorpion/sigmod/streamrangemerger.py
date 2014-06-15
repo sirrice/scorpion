@@ -351,7 +351,7 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
 
     if not clusters: return []
 
-    _logger.debug("merger\t%s\tadding %d clusters", partitionkey, len(clusters))
+    nclusters = len(clusters)
     clusters = self.setup_stats(clusters)
     frontier = self.get_frontier_obj(idx, partitionkey)
     clusters, _ = frontier.update(clusters)
@@ -369,8 +369,7 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
         checker = lambda c: not any(map(frontier.__contains__, c.ancestors))
         self.tasks[tkey] = filter(checker, self.tasks[tkey])
 
-    if clusters:
-      _logger.debug("merger\t%s\tadded %d clusters\t%d tasks left", partitionkey, len(clusters), self.ntasks)
+    _logger.debug("merger\t%s\tadding %d of %d clusters\t%d tasks left", partitionkey, nclusters, len(clusters), self.ntasks)
     return clusters
 
 

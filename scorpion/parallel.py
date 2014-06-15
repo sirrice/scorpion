@@ -317,7 +317,6 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
           partitions[key].append(c)
 
         for key, cs in partitions.iteritems():
-          _logger.debug("merger\tadd_clusters %d" % len(clusters))
           added = merger.add_clusters(cs, partitionkey=key)
 
         if added:
