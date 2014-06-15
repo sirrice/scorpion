@@ -41,23 +41,23 @@ def partition_f(name, params, tables, full_table, (inq, outq)):
       except Empty:
         pass
 
-      rules = []
-      for node in gen:
+      pairs = []
+      for node, isleaf in gen:
         rule = node.rule
         rule.quality = node.influence
         rule = rule.simplify(full_table)
-        rules.append(rule)
-        if len(rules) >= 10: break
+        pairs.append((rule, isleaf))
+        if len(pairs) >= 10: break
 
-      if not rules: 
+      if not pairs: 
         if not partitioner.is_done:
           _logger.debug("%s\tno nodes from generator but partitioner not done..."%name)
         continue
 
       bound = partitioner.get_inf_bound()
 
-      dicts = [r.to_json() for r in rules]
-      _logger.debug("%s\tsend %d rules\t%s" % (name, len(rules), map(hash, map(str, dicts))))
+      dicts = [(r.to_json(), isleaf) for r, isleaf in pairs]
+      _logger.debug("%s\tsend %d rules\t%s" % (name, len(pairs), map(hash, map(str, dicts))))
       outq.put((dicts, bound))
       _logger.debug("%s\tsent %s!" % (name, len(dicts)))
   except Exception as e:
@@ -159,9 +159,10 @@ class BDTTablesPartitioner(Basic):
         parent = leaf.parent
         leaf.parent = None
         #self.grow(leaf, self.tables, self.samp_rates, all_infs)
-        for n in self.grow(leaf, samples, self.samp_rates, all_infs):
+        for pair in self.grow(leaf, samples, self.samp_rates, all_infs):
+          n, isleaf = pair
           _logger.debug("yield:\t%s", str(n))
-          yield n
+          yield pair
         leaf.parent = parent
 
       self.is_done = True
@@ -387,22 +388,17 @@ class BDTTablesPartitioner(Basic):
           (time.time() - self.start_time) >= self.max_wait
           )
         
-    def grow_next(self):
-      args = self.candidates.next()
-      if args:
-        return self.grow(*args)
-      return None
 
 
     def grow(self, node, tables, samp_rates, sample_infs=None):
       if self.time_exceeded():
         _logger.debug("time exceeded %.2f > %d", (time.time()-self.start_time), self.max_wait)
-        yield node
+        yield (node, False)
         return
 
       if node.rule in self.seen:
         _logger.debug("rule seen %d\t%s", hash(node.rule), node.rule)
-        yield node
+        yield (node, False)
         return
       self.seen.add(node.rule)
 
@@ -417,7 +413,7 @@ class BDTTablesPartitioner(Basic):
       node.n = sum(node.cards)
 
       if node.n == 0:
-        yield node
+        yield (node, False)
         return
 
       #
@@ -438,13 +434,13 @@ class BDTTablesPartitioner(Basic):
         self.print_status(rule, datas, sample_infs)
         if self.should_stop(sample_infs):
           node.states = self.get_states(datas)
-          yield node
+          yield (node, True)
           return
 
 
       if self.time_exceeded():
         _logger.debug("time exceeded %.2f > %d", (time.time()-self.start_time), self.max_wait)
-        yield node
+        yield (node, False)
         return 
 
 
@@ -464,7 +460,7 @@ class BDTTablesPartitioner(Basic):
 
       if not attr_scores:
         node.states = self.get_states(datas)
-        yield node
+        yield (node, True)
         return
 
       attr_scores.sort(key=lambda p: p[-2])
@@ -474,12 +470,12 @@ class BDTTablesPartitioner(Basic):
       minscore = curscore - abs(curscore) * self.min_improvement
       if node.score >= minscore and minscore != -inf:
         _logger.debug("bdt:  \tscore didn't improve\t%.7f >= %.7f", min(scores), minscore)
-        yield node
+        yield (node, True)
         return
 
       if node.score <= curscore - abs(curscore) * 0.05:
         _logger.debug("bdt:  \tbig improvement\t%s", str(new_rules[0]))
-        yield node
+        yield (node, False)
 
       ncands = max(1, 2 - node.depth)
       for attr, new_rules, score, scores in attr_scores[:ncands]:
@@ -497,10 +493,10 @@ class BDTTablesPartitioner(Basic):
 
           args = (child, rule2datas[new_rule], new_srs, rule2infs[new_rule])
           #self.candidates.add((score, new_rule.quality, args))
-          for n in self.grow(*args):
-            yield n
+          for pair in self.grow(*args):
+            yield pair
 
-      yield node
+      yield (node, False)
 
 
     @instrument

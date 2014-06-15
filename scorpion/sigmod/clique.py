@@ -113,8 +113,8 @@ class MR(Basic):
   def __call__(self, full_table, bad_tables, good_tables, **kwargs):
     self.setup_tables(full_table, bad_tables, good_tables, **kwargs)
     self.update_status("running bottom up algorithm")
-    for blahs in self.find_cliques():
-      rules = [b.rule for b in blahs]
+    for pairs in self.find_cliques():
+      rules = [(b.rule, iteridx) for b, iteridx in pairs]
       yield rules
     self.update_status("bottom up algorithm done")
 
@@ -169,12 +169,12 @@ class MR(Basic):
         if nadded % 25 == 0 and nadded > 0:
           newbests = filter(lambda c: c not in seen, self.best)
           seen.update(self.best)
-          yield newbests
+          yield zip(newbests, [niters]*len(newbests))
 
 
       newbests = filter(lambda c: c not in seen, self.best)
       seen.update(self.best)
-      yield newbests
+      yield zip(newbests, [niters]*len(newbests))
       if not nadded: 
         break 
 

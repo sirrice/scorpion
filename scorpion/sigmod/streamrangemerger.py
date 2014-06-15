@@ -22,6 +22,9 @@ from rangemerger import RangeMerger2
 
 _logger = get_logger()
 
+
+    
+ 
 class StreamRangeMerger(RangeMerger2):
   def __init__(self, *args, **kwargs):
     super(StreamRangeMerger, self).__init__(*args, **kwargs)
@@ -29,9 +32,6 @@ class StreamRangeMerger(RangeMerger2):
 
     # idx -> clusters to expand  -- different than clusters on frontier!!
     self.tasks = defaultdict(list)
-
-    # tracks the valid expansions for each frontier cluster
-    self.valid_expansions = defaultdict(lambda: defaultdict(lambda: True))
 
     # all values for each dimension
     self.all_cont_vals = defaultdict(set) # idx -> values
@@ -58,6 +58,10 @@ class StreamRangeMerger(RangeMerger2):
     while version >= len(self.frontiers):
       self.frontiers.append(ContinuousFrontier(self.c_range, 0.05))
     return self.frontiers[version]
+
+  @property
+  def frontier_iter(self):
+    return list(self.frontiers)
 
   def setup_stats(self, clusters):
     all_inf = lambda l: all([abs(v) == float('inf') for v in l])
@@ -90,7 +94,7 @@ class StreamRangeMerger(RangeMerger2):
 
   def best_so_far(self, prune=False):
     clusters = set()
-    for frontier in self.frontiers:
+    for frontier in self.frontier_iter:
       clusters.update(frontier.frontier)
     if prune:
       clusters = self.get_frontier(clusters)[0]
@@ -113,7 +117,7 @@ class StreamRangeMerger(RangeMerger2):
       self.print_clusters(clusters)
       self.renderer.new_page()
       self.renderer.set_title("add_clusters %d clusters" % len(clusters))
-      for f in self.frontiers:
+      for f in self.frontier_iter:
         self.renderer.plot_inf_curves(f.frontier, color='grey') 
       self.renderer.plot_inf_curves(clusters, color='green')
 
@@ -141,6 +145,7 @@ class StreamRangeMerger(RangeMerger2):
       _logger.debug("merger:\tadded %d clusters\t%d tasks left", len(clusters), self.ntasks)
     return clusters
 
+
   @property
   def ntasks(self):
     if len(self.tasks) == 0: return 0
@@ -152,73 +157,78 @@ class StreamRangeMerger(RangeMerger2):
 
   def next_tasks(self, n=1):
     ret = []
-    for idx in reversed(self.tasks.keys()):
-      tasks = self.tasks[idx]
+    for tkey in reversed(self.tasks.keys()):
+      tasks = self.tasks[tkey]
       while len(ret) < n and tasks:
         idx = random.randint(0, len(tasks)-1)
         ret.append((idx, tasks.pop(idx)))
     return ret
 
 
+
   @instrument
-  def __call__(self, clusters=[], n=2):
+  def __call__(self, n=2):
     """
     Return any successfully expanded clusters (improvements)
     """
-    self.add_clusters(clusters)
-
-    to_hash = lambda cs: set([c.bound_hash for c in cs])
-
     nmerged = self.nmerged
     start = time.time()
     tasks = self.next_tasks(n)
     improvements = set()
+
     for idx, cluster in tasks:
-      if not (idx == 0 or self.valid_cluster_f(cluster)):
-        print "merger\tbelow thresh skipping\t %s" % cluster
-        continue
+      cur_frontier = self.get_frontier_obj(idx)
+      next_frontier = self.get_frontier_obj(idx+1)
+      new_clusters = self.run_task(idx, cluster, cur_frontier, next_frontier)
 
-      if self.DEBUG:
-        self.renderer.new_page()
-        self.renderer.set_title("expand %s" % str(cluster.rule))
-        self.renderer.plot_inf_curves([cluster], color='grey') 
-
-      expanded = self.greedy_expansion(cluster, self.seen, idx, None)
-      expanded = [c for c in expanded if c.bound_hash != cluster.bound_hash]
-      exp_bounds = to_hash(expanded)
-
-      if self.DEBUG:
-        self.renderer.plot_inf_curves(expanded, color='green')
-
-      cur_expanded, rms = self.get_frontier_obj(idx).update(expanded)
-      next_expanded, rms2 = self.get_frontier_obj(idx+1).update(cur_expanded)
-      cur_bounds = to_hash(cur_expanded)
-      next_bounds = to_hash(next_expanded)
-
-      f = lambda c: c.bound_hash != cluster.bound_hash
-      improved_clusters = set(filter(f, next_expanded))
-      for c in chain(cur_expanded, rms):
-        _logger.debug("merger\texpanded\tcur_idx(%s)\tnext_idx(%s)\t%.3f-%.3f\t%s", 
-            (c.bound_hash in exp_bounds), 
-            (c.bound_hash in next_bounds), 
-            c.c_range[0], c.c_range[1],
-            c.rule.simplify())
-      if self.DEBUG:
-        self.renderer.plot_active_inf_curves(self.get_frontier_obj(idx).frontier, color='blue')
-        self.renderer.plot_active_inf_curves(self.get_frontier_obj(idx+1).frontier, color='red')
-
-      if not improved_clusters:
-        continue
-
-      #self.adj_graph.insert(next_expanded, version=idx+1)
       debug = self.DEBUG
       self.DEBUG = False
-      self.add_clusters(improved_clusters, idx+1)
+      self.add_clusters(new_clusters, idx+1)
       self.DEBUG = debug
-      improvements.update(improved_clusters)
-    print "merger\ttook %.1f sec\t%d improved\t%d tried\t%d tasks left" % (time.time()-start, len(improvements), (self.nmerged-nmerged), self.ntasks)
+      improvements.update(new_clusters)
+
+    _logger.debug("merger\ttook %.1f sec\t%d improved\t%d tried\t%d tasks left", 
+        time.time()-start, len(improvements), (self.nmerged-nmerged), self.ntasks)
     return improvements
 
+
+  def run_task(self, idx, cluster, cur_frontier, next_frontier):
+    if not (idx == 0 or self.valid_cluster_f(cluster)):
+      _logger.debug("merger\tbelow thresh skipping\t %s" % cluster)
+      return []
+
+    if self.DEBUG:
+      self.renderer.new_page()
+      self.renderer.set_title("expand %s" % str(cluster.rule))
+      self.renderer.plot_inf_curves([cluster], color='grey') 
+
+    expanded = self.greedy_expansion(cluster, self.seen, idx, None)
+    expanded = [c for c in expanded if c.bound_hash != cluster.bound_hash]
+
+    if self.DEBUG:
+      self.renderer.plot_inf_curves(expanded, color='green')
+
+    cur_expanded, rms = cur_frontier.update(expanded)
+    next_expanded, rms2 = next_frontier.update(cur_expanded)
+    f = lambda c: c.bound_hash != cluster.bound_hash
+    improved_clusters = set(filter(f, next_expanded))
+
+    to_hash = lambda cs: set([c.bound_hash for c in cs])
+    exp_bounds = to_hash(expanded)
+    cur_bounds = to_hash(cur_expanded)
+    next_bounds = to_hash(next_expanded)
+
+    for c in chain(cur_expanded, rms):
+      _logger.debug("merger\texpanded\tcur_idx(%s)\tnext_idx(%s)\t%.3f-%.3f\t%s", 
+          (c.bound_hash in exp_bounds), 
+          (c.bound_hash in next_bounds), 
+          c.c_range[0], c.c_range[1],
+          c.rule.simplify())
+    if self.DEBUG:
+      self.renderer.plot_active_inf_curves(cur_frontier.frontier, color='blue')
+      self.renderer.plot_active_inf_curves(next_frontier.frontier, color='red')
+
+    return improved_clusters
 
 
   @instrument
@@ -246,7 +256,8 @@ class StreamRangeMerger(RangeMerger2):
     key = cluster.bound_hash
     if direction == 'disc':
       for subset in self.rejected_disc_vals[dim]:
-        if subset.issubset(vals): return []
+        if subset.issubset(vals): 
+          return []
     if direction == 'inc':
       cont_vals = self.rejected_cont_vals[(dim, direction)]
       if cont_vals:
@@ -257,14 +268,8 @@ class StreamRangeMerger(RangeMerger2):
         vals = filter(lambda v: v < min(cont_vals), vals)
     return vals
 
-    if not self.valid_expansions[key][(dim, direction)]: return False
-    if cluster.parents:
-      return self.check_direction(cluster.parents[0], dim, direction)
-    return True
-  
-  def update_direction(self, cluster, dim, direction, ok, val):
+  def update_rejected_directions(self, cluster, dim, direction, ok, val):
     key = cluster.bound_hash
-    self.valid_expansions[key][(dim, direction)] &= ok
 
     if direction == 'disc':
       for v in list(val):
@@ -275,16 +280,13 @@ class StreamRangeMerger(RangeMerger2):
     if direction == 'dec':
       self.rejected_cont_vals[(dim, direction)].add(round(val, 1))
 
-
-
   @instrument
-  def greedy_expansion(self, cluster, seen, version=None, frontier=None, valid_expansions=None):
+  def greedy_expansion(self, cluster, seen, version=None, frontier=None):
     _logger.debug("merger\tgreedy_expand\t%s", cluster.rule.simplify())
-    if not valid_expansions:
+    if not frontier:
       self.rejected_disc_vals = defaultdict(list)
       self.rejected_cont_vals = defaultdict(set)
-      valid_expansions = defaultdict(lambda: True)
-    if not frontier:
+
       frontier = ContinuousFrontier(self.c_range, 0.05)
       frontier.update([cluster])
 
@@ -312,7 +314,7 @@ class StreamRangeMerger(RangeMerger2):
  
         if not expanded:
           seen.add(tmp.bound_hash)
-          self.update_direction(cluster, dim, direction, True, v)
+          self.update_rejected_directions(cluster, dim, direction, True, v)
           if direction != 'disc':
             break
 
@@ -321,6 +323,88 @@ class StreamRangeMerger(RangeMerger2):
     for c in frontier.frontier:
       c.c_range = list(self.c_range)
     return frontier.frontier
+
+
+class PartitionedStreamRangeMerger(StreamRangeMerger):
+
+  def __init__(self, *args, **kwargs):
+    super(PartitionedStreamRangeMerger, self).__init__(*args, **kwargs)
+    self.frontiers = defaultdict(list)
+    self.tasks = defaultdict(list)
+
+  def get_frontier_obj(self, version, partitionkey):
+    frontiers = self.frontiers[partitionkey]
+    while version >= len(frontiers):
+      frontiers.append(ContinuousFrontier(self.c_range, 0.05))
+    return frontiers[version]
+  
+  @property
+  def frontier_iter(self):
+    return chain(*self.frontiers.values())
+
+  def add_clusters(self, clusters, idx=0, partitionkey=None):
+    """
+    Return list of new clusters that are on the frontier
+    """
+    if partitionkey is None:
+      raise RuntimeError('addclusters partitionkey cannot be none')
+
+    if not clusters: return []
+
+    _logger.debug("merger\t%s\tadding %d clusters", partitionkey, len(clusters))
+    clusters = self.setup_stats(clusters)
+    frontier = self.get_frontier_obj(idx, partitionkey)
+    clusters, _ = frontier.update(clusters)
+
+    # clear out current tasks
+    tkey = (partitionkey, idx)
+    self.tasks[tkey] = filter(frontier.__contains__, self.tasks[tkey])
+    self.tasks[tkey].extend(clusters)
+
+    if idx == 0:
+      # remove non-frontier-based expansions from future expansion
+      for (pkey, tidx) in self.tasks.keys():
+        if pkey != partitionkey: continue
+        if tidx == 0: continue
+        checker = lambda c: not any(map(frontier.__contains__, c.ancestors))
+        self.tasks[tkey] = filter(checker, self.tasks[tkey])
+
+    if clusters:
+      _logger.debug("merger\t%s\tadded %d clusters\t%d tasks left", partitionkey, len(clusters), self.ntasks)
+    return clusters
+
+
+  def next_tasks(self, n=1):
+    ret = []
+    for tkey in reversed(self.tasks.keys()):
+      tasks = self.tasks[tkey]
+      while len(ret) < n and tasks:
+        idx = random.randint(-1, len(tasks)-1)
+        ret.append((tkey[0], idx, tasks.pop(idx)))
+    return ret
+
+
+  def __call__(self, n=2):
+    nmerged = self.nmerged
+    start = time.time()
+    tasks = self.next_tasks(n)
+    improvements = set()
+
+    for pkey, idx, cluster in tasks:
+      cur_frontier = self.get_frontier_obj(idx, pkey)
+      next_frontier = self.get_frontier_obj(idx+1, pkey)
+      new_clusters = self.run_task(idx, cluster, cur_frontier, next_frontier)
+
+      debug = self.DEBUG
+      self.DEBUG = False
+      self.add_clusters(new_clusters, idx=idx+1, partitionkey=pkey)
+      self.DEBUG = debug
+      improvements.update(new_clusters)
+
+      _logger.debug("merger\t%s\ttook %.1f sec\t%d improved\t%d tried\t%d tasks left", 
+          pkey, time.time()-start, len(improvements), (self.nmerged-nmerged), self.ntasks)
+    return improvements
+
 
 
 

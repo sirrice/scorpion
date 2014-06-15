@@ -22,6 +22,9 @@ from scorpion.util import *
 
 
 class Frontier(object):
+  _id = 0
+
+
   """
   Iteratively look for the skyline of a list of influence functions
   by identifying intersection points while scanning from left to right
@@ -49,6 +52,8 @@ class Frontier(object):
     self.min_granularity = min_granularity
     self.heap = Intersection(c_range)
     self.stats = defaultdict(lambda: [0,0])
+    self.id = Frontier._id 
+    Frontier._id += 1
 
   def __call__(self, clusters):
     """

@@ -25,7 +25,7 @@ from arch import *
 from util import *
 from sigmod import *
 from settings import ID_VAR
-from sigmod.streamrangemerger import StreamRangeMerger
+from sigmod.streamrangemerger import *
 
 
 _logger = get_logger()
@@ -177,11 +177,11 @@ def serial_hybrid(obj, aggerr, **kwargs):
     proc.start()
 
     # loop
-    for rules in learner(all_full_table, bad_tables, good_tables):
-      if not rules: continue
-      jsons = [r.to_json() for r in rules]
-      _logger.debug("main\tsend to child proc %d rules" % len(jsons))
-      par2chq.put(jsons)
+    for pairs in learner(all_full_table, bad_tables, good_tables):
+      if not pairs: continue
+      json_pairs = [(r.to_json(), idxkey) for r, idxkey in pairs]
+      _logger.debug("main\tsend to child proc %d rules" % len(json_pairs))
+      par2chq.put(json_pairs)
     _logger.debug("main\tsend to child proc DONE")
     par2chq.put('done')
     par2chq.close()
@@ -202,18 +202,21 @@ def serial_hybrid(obj, aggerr, **kwargs):
       'learner' : learner,
       'partitions_complete': False
     })
-    merger = StreamRangeMerger(**mparams)
+    merger = PartitionedStreamRangeMerger(**mparams)
 
     allrules = []
-    for rules in learner(all_full_table, bad_tables, good_tables):
-      allrules.extend(rules)
-    clusters = rules_to_clusters(allrules, learner)
-    merger.add_clusters(clusters)
-    learner.update_rules(
-      aggerr.agg.shortname, 
-      group_clusters(merger.best_so_far(), learner)
-    )
-    learner.update_status("waiting for merging step to finish")
+    for pairs in learner(all_full_table, bad_tables, good_tables):
+      allrules.extend(pairs)
+    rules, keyidxs = zip(*allrules)
+    clusters = rules_to_clusters(rules, learner)
+    pairs = zip(clusters, keyidxs)
+    partitions = defaultdict(list)
+    for c, key in pairs:
+      partitions[key].append(c)
+    print "partitions: %s" % (partitions.keys())
+
+    for key, cs in partitions.iteritems():
+      merger.add_clusters(cs, partitionkey=key)
 
     while merger.has_next_task():
       merger()
@@ -269,6 +272,14 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   valid_cluster_f = lambda c: c.inf_state[0] and max(c.inf_state[0]) > threshold
   valid_cluster_f = lambda c: True
 
+  def update_status(msg):
+    start = time.time()
+    merged = list(merger.best_so_far())
+    rules = group_clusters(merged, learner)
+    rules = [r.simplify(cdists=learner.cont_dists, ddists=learner.disc_dists) for r in rules]
+    learner.update_rules(aggerr.agg.shortname, rules)
+    _logger.debug("merger\t%s %d rules\t%.4f sec", msg, len(rules), time.time()-start)
+
   params = dict(params)
   params.update({
     'learner_hash': hash(learner),
@@ -276,49 +287,46 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
     'partitions_complete': False,
     'valid_cluster_f': valid_cluster_f 
   })
-  merger = StreamRangeMerger(**params)
+  merger = PartitionedStreamRangeMerger(**params)
 
   # setup a merger
   merged = []
-  jsons = []
+  json_pairs = []
   done = False
   while not done or merger.has_next_task():
     if not done:
       try:
-        jsons = in_conn.get(False)
+        json_pairs = in_conn.get(False)
       except Empty:
-        jsons = []
+        json_pairs = []
         pass
 
-    if jsons == 'done': 
+    if json_pairs == 'done': 
       done = True
-      jsons = []
+      json_pairs = []
 
     try:
-      rules = [SDRule.from_json(d, learner.full_table) for d in jsons]
-      clusters = rules_to_clusters(rules, learner)
+      if json_pairs:
+        pairs = [(SDRule.from_json(d, learner.full_table), keyidx) for d, keyidx in json_pairs]
+        rules, idxkeys = tuple(zip(*pairs))
+        clusters = rules_to_clusters(rules, learner)
 
-      if clusters:
-        _logger.debug("merger\tadd_clusters %d" % len(clusters))
-        added = merger.add_clusters(clusters)
+        pairs = zip(idxkeys, clusters)
+        partitions = defaultdict(list)
+        for key, c in pairs:
+          partitions[key].append(c)
+
+        for key, cs in partitions.iteritems():
+          _logger.debug("merger\tadd_clusters %d" % len(clusters))
+          added = merger.add_clusters(cs, partitionkey=key)
 
         if added:
-          start = time.time()
-          merged = list(merger.best_so_far())
-          rules = group_clusters(merged, learner)
-          rules = [r.simplify(cdists=learner.cont_dists, ddists=learner.disc_dists) for r in rules]
-          learner.update_rules(aggerr.agg.shortname, rules)
-          _logger.debug("merger\tadded %d rules\t%.4f sec" % (len(rules), time.time()-start))
+          update_status("added")
 
       if merger.has_next_task():
         _logger.debug("merger\tprocess tasks\t%d tasks left" % merger.ntasks)
         if merger():
-          start = time.time()
-          merged = list(merger.best_so_far())
-          rules = group_clusters(merged, learner)
-          rules = [r.simplify(cdists=learner.cont_dists, ddists=learner.disc_dists) for r in rules]
-          learner.update_rules(aggerr.agg.shortname, rules)
-          _logger.debug("merger\tupdated %d rules\t%.4f sec" % (len(rules), time.time()-start))
+          update_status("updated")
         else:
           _logger.debug("merger\tno improvements")
 

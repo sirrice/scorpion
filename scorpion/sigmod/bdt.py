@@ -239,11 +239,11 @@ class BDT(Basic):
 
     @instrument
     def get_partitions(self, full_table, bad_tables, good_tables, **kwargs):
-      clusters, nonleaf_clusters = self.load_from_cache()
-      if clusters:
-        yield clusters
-        return
-        #return clusters, nonleaf_clusters
+      #clusters, nonleaf_clusters = self.load_from_cache()
+      #if clusters:
+      #  yield clusters
+      #  return
+      #  #return clusters, nonleaf_clusters
 
       max_wait = self.params.get('max_wait', kwargs.get('max_wait', None))
 
@@ -267,16 +267,16 @@ class BDT(Basic):
         partitioner = BDTTablesPartitioner(**bad_params)
         partitioner.setup_tables(bad_tables, full_table)
         gen = partitioner()
-        rules = [n.rule for n in gen]
-        yield rules
+        pairs = [(n.rule, isleaf) for n, isleaf in gen]
+        yield pairs
         bound = partitioner.get_inf_bound()
 
         partitioner = BDTTablesPartitioner(**good_params)
         partitioner.setup_tables(good_tables, full_table)
         partitioner.update_inf_bound(bound)
         gen = partitioner()
-        rules = [n.rule for n in gen]
-        yield rules
+        pairs = [(n.rule, isleaf) for n, isleaf in gen]
+        yield pairs
         return
 
 
@@ -324,16 +324,17 @@ class BDT(Basic):
         if bound and not gdone:
           good_p2cq.put(bound)
 
-        dicts = []
+        pairs = []
         if bnodes:
-          dicts.extend(bnodes)
+          pairs.extend(bnodes)
         if gnodes:
-          dicts.extend(gnodes)
+          pairs.extend(gnodes)
 
-        if dicts:
-          _logger.debug("part\tgot %s\t%s" % (len(dicts), map(hash, map(str, dicts))))
-          rules = [SDRule.from_json(d, full_table) for d in dicts]
-          yield rules
+        if pairs:
+          dicts = [p[0] for p in pairs]
+          _logger.debug("part\tgot %s\t%s" % (len(pairs), map(hash, map(str, dicts))))
+          pairs = [(SDRule.from_json(d, full_table), isleaf) for d, isleaf in pairs]
+          yield pairs
 
       self.update_status("done partitioning")
       bad_p2cq.close()
@@ -361,8 +362,8 @@ class BDT(Basic):
         """
         self.setup_tables(full_table, bad_tables, good_tables, **kwargs)
 
-        for clusters in self.get_partitions(full_table, bad_tables, good_tables, **kwargs):
-          yield clusters
+        for pairs in self.get_partitions(full_table, bad_tables, good_tables, **kwargs):
+          yield pairs
         return
 
 
