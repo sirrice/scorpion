@@ -360,7 +360,8 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
   def frontier_iter(self):
     return chain(*self.frontiers.values())
 
-  def add_clusters(self, clusters, idx=0, partitionkey=None):
+  def add_clusters(self, 
+      clusters, idx=0, partitionkey=None, skip_frontier=False):
     """
     Return list of new clusters that are on the frontier
     """
@@ -381,7 +382,8 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
     nclusters = len(clusters)
     clusters = self.setup_stats(clusters)
     frontier = self.get_frontier_obj(idx, partitionkey)
-    clusters, _ = frontier.update(clusters)
+    if not skip_frontier:
+      clusters, _ = frontier.update(clusters)
 
     if self.DEBUG:
       print "base_frontier"
@@ -430,7 +432,7 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
 
       debug = self.DEBUG
       self.DEBUG = False
-      self.add_clusters(new_clusters, idx=idx+1, partitionkey=pkey)
+      self.add_clusters(new_clusters, idx=idx+1, partitionkey=pkey, skip_frontier=True)
       self.DEBUG = debug
       improvements.update(new_clusters)
 
