@@ -21,7 +21,8 @@ setup(name="scorpion",
         'tests/unit/adjgraph.py',
         'tests/unit/sharedobj.py',
         'tests/unit/render.py',
-        'tests/unit/sharedobj.py'
+        'tests/unit/sharedobj.py',
+        'bin/fixnulls.py',
       ],
       package_data = {
         'scorpion': [

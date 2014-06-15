@@ -17,7 +17,7 @@ def get_cols(db, tablename):
 
 def fix_typ(db, tablename, col, count, typ, bfix):
   vals = []
-  if 'varchar' in typ:
+  if 'char' in typ:
     t = str
     vals = ['', 'NULL', '_NULL_']
   elif 'int' in typ:
@@ -32,6 +32,19 @@ def fix_typ(db, tablename, col, count, typ, bfix):
   else:
     vals = []
     print "\t%s\t%s\tno defaults" % (typ, col)
+
+  if 'char' in typ or 'text' in typ:
+    print "removing single quotes"
+    q = """UPDATE %s 
+    SET %s = replace(%s, e'\\'', '') 
+    WHERE substring(%s from e'\\'') is not null;""" % (tablename, col, col, col)
+    print q
+    db.execute(q)
+    try:
+      db.commit()
+    except Exception as e:
+      print "\t%s" % e
+    print "\tsuccess"
 
   if count == 0: return
 
@@ -52,6 +65,7 @@ def fix_typ(db, tablename, col, count, typ, bfix):
         pass
       print "\tsuccess"
       break
+
 
 
 
