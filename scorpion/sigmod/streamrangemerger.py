@@ -28,6 +28,8 @@ _logger = get_logger()
 class StreamRangeMerger(RangeMerger2):
   def __init__(self, *args, **kwargs):
     super(StreamRangeMerger, self).__init__(*args, **kwargs)
+    self.get_frontier = CheapFrontier(self.c_range, K=2, nblocks=30)
+
     self.valid_cluster_f = kwargs.get('valid_cluster_f', lambda c: True)
 
     # idx -> clusters to expand  -- different than clusters on frontier!!
