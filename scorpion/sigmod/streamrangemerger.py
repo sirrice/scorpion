@@ -296,6 +296,7 @@ class StreamRangeMerger(RangeMerger2):
       vals = self.check_direction(cluster, dim, direction, vals)
       realvals = self.pick_expansion_vals(cluster, dim, direction, vals)
 
+      nfails = 0
       for v in realvals:
         tmp = None
         if direction == 'inc':
@@ -316,7 +317,9 @@ class StreamRangeMerger(RangeMerger2):
           seen.add(tmp.bound_hash)
           self.update_rejected_directions(cluster, dim, direction, True, v)
           if direction != 'disc':
-            break
+            nfails += 1
+            if nfails > 1:
+              break
 
         cluster = tmp
 
@@ -369,7 +372,7 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
         checker = lambda c: not any(map(frontier.__contains__, c.ancestors))
         self.tasks[tkey] = filter(checker, self.tasks[tkey])
 
-    _logger.debug("merger\t%s\tadding %d of %d clusters\t%d tasks left", partitionkey, nclusters, len(clusters), self.ntasks)
+    _logger.debug("merger\t%s\tadding %d of %d clusters\t%d tasks left", partitionkey, len(clusters), nclusters, self.ntasks)
     return clusters
 
 

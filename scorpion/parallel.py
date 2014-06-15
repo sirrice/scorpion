@@ -13,7 +13,7 @@ import errfunc
 import numpy as np
 
 from sklearn.cluster import KMeans
-from itertools import chain
+from itertools import chain, groupby
 from collections import defaultdict
 from datetime import datetime
 from multiprocessing import Process, Queue, Pool, Pipe
@@ -210,13 +210,8 @@ def serial_hybrid(obj, aggerr, **kwargs):
     rules, keyidxs = zip(*allrules)
     clusters = rules_to_clusters(rules, learner)
     pairs = zip(clusters, keyidxs)
-    partitions = defaultdict(list)
-    for c, key in pairs:
-      partitions[key].append(c)
-    print "partitions: %s" % (partitions.keys())
-
-    for key, cs in partitions.iteritems():
-      merger.add_clusters(cs, partitionkey=key)
+    for key, g in groupby(pairs, key=lambda p: p[1]):
+      merger.add_clusters(list(g), partitionkey=key)
 
     while merger.has_next_task():
       merger()
@@ -310,14 +305,10 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
         pairs = [(SDRule.from_json(d, learner.full_table), keyidx) for d, keyidx in json_pairs]
         rules, idxkeys = tuple(zip(*pairs))
         clusters = rules_to_clusters(rules, learner)
+        pairs = zip(clusters, idxkeys)
 
-        pairs = zip(idxkeys, clusters)
-        partitions = defaultdict(list)
-        for key, c in pairs:
-          partitions[key].append(c)
-
-        for key, cs in partitions.iteritems():
-          added = merger.add_clusters(cs, partitionkey=key)
+        for key, g in groupby(pairs, key=lambda p: p[1]):
+          added = merger.add_clusters(list(g), partitionkey=key)
 
         if added:
           update_status("added")
@@ -342,10 +333,6 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   merged = merger.best_so_far(True)
   merger.close()
   _logger.debug("merger\tsending %d results back", len(merged))
-  #for c in merged:
-  #  c.rule.c_range = c.c_range
-  #  c.rule.inf_state = c.inf_state
-  #  _logger.debug("merger\tsending result\t%s", c)
   out_conn.put([c.rule.to_json() for c in merged])
   in_conn.close()
   out_conn.close()
