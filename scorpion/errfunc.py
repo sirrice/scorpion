@@ -9,10 +9,8 @@ def compute_bad_inf(bdelta, bcount, c):
 compute_bad_inf = np.vectorize(compute_bad_inf)
 
 def compute_bad_score(bds, bcs, c, smooth=0.015):
-  if not bds: return -float('inf')
-
-  if len(filter(bool, bcs)) == 0:
-    return -float('inf')
+  if not bds or len(filter(bool, bcs)) == 0: 
+    return c * -float('inf')
 
   topbots = zip(bds, bcs)
   binfs = [compute_bad_inf(top, bot, c) for top, bot in topbots]

@@ -24,11 +24,14 @@ from scorpion.util import *
 class Frontier(object):
   _id = 0
 
-
   """
   Iteratively look for the skyline of a list of influence functions
   by identifying intersection points while scanning from left to right
 
+  The module is actually passed lists of Cluster objects, which implement
+  an influence function: 
+
+      c.inf_func(c_value) -> influence value
 
   while heap:
     if init
@@ -219,6 +222,9 @@ class Frontier(object):
 class ContinuousFrontier(Frontier):
   """
   Maintains the frontier across a "stream" of cluster objects
+
+  The update() method updates the internal set of clusters on the 
+  frontier.
   """
 
 
@@ -236,7 +242,8 @@ class ContinuousFrontier(Frontier):
   def __contains__(self, c):
     if c is None: return False
     if hasattr(c, 'bound_hash'):
-      return c.bound_hash in self.seen
+      return c.bound_hash in set([c2.bound_hash for c2 in self.frontier])
+      #self.seen
     return False
 
   @instrument
@@ -255,7 +262,7 @@ class ContinuousFrontier(Frontier):
     self.frontier.update(new_clusters)
     self.seen.update([c.bound_hash for c in clusters])
 
-    adds_hashes = set([c.bound_hash for c in adds])
+    adds_hashes = set([c.bound_hash for c in clusters])
     adds = [c for c in self.frontier if c.bound_hash in adds_hashes]
     adds = set(adds)
     return adds, rms
@@ -313,9 +320,161 @@ class ContinuousFrontier(Frontier):
     return adds, rms, new_spans
 
 
+
+
+class CheapFrontier(Frontier):
+  """
+  Sampling based approximate frontier.  Computes influence values
+  at a fixed number of c values for each cluster and uses those to
+  pick the frontier.
+
+  In practice, >40 c values gets pretty good results.
+  Ends up being faster than the above root-finding-based approaches
+  """
+
+  def __init__(self, c_range, min_granularity=0, K=3, nblocks=100):
+    """
+    Args
+      min_granularity: minimum distance between adjacent intersections
+      K: select top-k at each bucket
+    """
+    Frontier.__init__(self, c_range, min_granularity=min_granularity)
+
+    self.nblocks = nblocks
+    xs = np.arange(nblocks).astype(float) / nblocks
+    self.blocksize = r_vol(c_range) / float(nblocks)
+    self.buckets = (xs * r_vol(c_range)) + c_range[0]
+    self.bests = defaultdict(list)   # bucket -> clusters
+    self.K = K
+
+    self.frontier = []
+    self.frontier_hashes = []
+    self.frontier_infs = []
+    self.threshold = np.zeros(nblocks).astype(float)
+
+  @instrument
+  def cluster_infs(self, c):
+    infs = c.inf_func(self.buckets)
+    infs[(infs == float('inf')) | (infs == float('-inf'))] = -1
+    return infs
+
+  @instrument
+  def compute_thresholds(self, all_infs, thresholds=None):
+    if thresholds is None:
+      thresholds = np.zeros(self.nblocks).astype(float)
+
+    ret = []
+    for bidx, bucket in enumerate(self.buckets):
+      bucket_infs = all_infs[:, bidx]
+      if len(bucket_infs) <= self.K:
+        thresh = bucket_infs.min()
+      else:
+        idx = np.argpartition(bucket_infs, -self.K)[-self.K]
+        thresh = bucket_infs[idx]
+        #thresh = np.percentile(bucket_infs, 90)
+      thresholds[bidx] = max(thresholds[bidx], thresh)
+
+    return thresholds
+
+
+  @instrument
+  def _get_frontier(self, clusters):
+    if len(clusters) == 0:
+      return []
+    if len(clusters) == 1:
+      return [ (clusters[0], self.c_range[0], self.c_range[1]) ]
+
+    clusters = list(clusters)
+    all_infs = [self.cluster_infs(c) for c in clusters]
+    try:
+      all_infs = np.array(all_infs)
+    except Exception as e:
+      print e
+      print all_infs
+    thresholds = self.compute_thresholds(all_infs)
+
+
+    # all_infs is a clusters x buckets matrix
+    # with a 1 in a cell if a cluster is "best" for
+    # that bucket
+    return self.all_infs_to_spans(clusters, all_infs, thresholds)
+
+  def all_infs_to_spans(self, clusters, all_infs, thresholds=None):
+    ret = []
+    for idx, c in enumerate(clusters):
+      infs = all_infs[idx]
+      ret.extend(self.infs_to_spans(c, infs, thresholds))
+    return ret
+
+  @instrument
+  def infs_to_spans(self, cluster, infs, thresholds=None):
+    if thresholds is None: 
+      thresholds = self.thresholds
+
+    ret = []
+    passes = infs >= thresholds
+    sidx = None
+    for bidx in xrange(len(self.buckets)):
+      if passes[bidx] == 1:
+        if sidx is None:
+          sidx = bidx
+      else:
+        if sidx is not None:
+          start = self.buckets[sidx]
+          end = self.buckets[bidx-1] + self.blocksize
+          print '%.2f-%.2f\t%s' % (start, end, cluster.rule)
+          ret.append((cluster, start, end))
+          sidx = None
+
+    if sidx is not None:
+      start = self.buckets[sidx]
+      end = self.c_range[1]
+      print '%.2f-%.2f\t%s' % (start, end, cluster.rule)
+      ret.append((cluster, self.buckets[sidx], self.c_range[1]))
+    return ret
+
+
+  @instrument
+  def update(self, clusters):
+    clusters = self(clusters)[0]
+    if len(clusters) == 0: 
+      return set(), set()
+    
+
+    arg_infs = [self.cluster_infs(c) for c in clusters]
+    arg_infs.extend(self.frontier_infs)
+    all_infs = np.array(arg_infs)
+    all_clusters = list(clusters)
+    all_clusters.extend(self.frontier)
+    self.thresholds = self.compute_thresholds(all_infs)
+    spans = self.all_infs_to_spans(all_clusters, all_infs, self.thresholds)
+
+    span_hashes = set([tup[0].bound_hash for tup in spans])
+    in_hash = lambda c: c.bound_hash in span_hashes
+
+    rms = [c for c in self.frontier if not in_hash(c)]
+    adds = [c for c in clusters if in_hash(c)]
+    hash2infs = {c.bound_hash : infs for c, infs in zip(all_clusters, all_infs)}
+
+    self.frontier = self.frontier_to_clusters(spans)
+    self.frontier_hashes = [c.bound_hash for c in self.frontier]
+    self.frontier_infs = []
+    for h, c in izip(self.frontier_hashes, self.frontier):
+      self.frontier_infs.append(hash2infs.get(h, self.cluster_infs(c)))
+    self.frontier_hashes = set(self.frontier_hashes)
+
+    return adds, rms
+
+  def __contains__(self, c):
+    if c is None: return False
+    if hasattr(c, 'bound_hash'):
+      return c.bound_hash in self.frontier_hashes
+    return False
+
+
 class Intersection(object):
   """
-  Computes and Caches intersection points
+  Computes and Caches intersection points between cluster curves
   """
   def __init__(self, bound):
     self.cache = defaultdict(list)
@@ -348,7 +507,9 @@ class Intersection(object):
       return None
 
     # XXX: make a REALLY big assumption that inf functions
-    #      are convex/concave and that this approximation is correct
+    #      are convex/concave, thus checking the values at a small
+    #      number of points is enough to assess if they intersect
+    #      at all
     xs = (self.rng * r_vol(bound)) + bound[0]
     start = time.time()
     c1s = c1.inf_func(xs)
@@ -363,6 +524,8 @@ class Intersection(object):
     self.stats['aprox_check'][1] += 1
     if nbools == len(xs) or nbools == 0:
       return None
+
+    # the curves are identical
     if nequals > 2:
       return None # wrong to return none
 

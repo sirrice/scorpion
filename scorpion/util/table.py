@@ -57,7 +57,7 @@ def valid_table_cols(table, cols, kwargs={}):
       continue
 
     nunique = len(set([row[attr].value for row in table]))
-    print "%s:\tnunique %s" % (attr.name, nunique)
+    print "nunique %s\t%s" % (nunique, attr.name)
 
     if attr.varType != orange.VarTypes.Continuous:
       if nunique > 100 and nunique > 0.7 * len(table) or nunique > 7000:

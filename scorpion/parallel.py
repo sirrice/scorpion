@@ -46,6 +46,9 @@ DEFAULT_PARAMS = {
   'p': 0.7
 }
 
+def pick(l, key):
+  return [v[key] for v in l]
+
 def parallel_debug(sharedobj, **kwargs):
   for aggerr in sharedobj.errors:
     runner(sharedobj, aggerr, **kwargs)
@@ -204,14 +207,15 @@ def serial_hybrid(obj, aggerr, **kwargs):
     })
     merger = PartitionedStreamRangeMerger(**mparams)
 
-    allrules = []
+    allpairs = []
     for pairs in learner(all_full_table, bad_tables, good_tables):
-      allrules.extend(pairs)
-    rules, keyidxs = zip(*allrules)
+      allpairs.extend(pairs)
+
+    rules, keyidxs = zip(*allpairs)
     clusters = rules_to_clusters(rules, learner)
     pairs = zip(clusters, keyidxs)
     for key, g in groupby(pairs, key=lambda p: p[1]):
-      merger.add_clusters(list(g), partitionkey=key)
+      merger.add_clusters(pick(g, 0), idx=0, partitionkey=key)
 
     while merger.has_next_task():
       merger()
@@ -269,9 +273,10 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
 
   def update_status(msg):
     start = time.time()
-    merged = list(merger.best_so_far())
+    merged = list(merger.best_so_far(True))
     rules = group_clusters(merged, learner)
-    rules = [r.simplify(cdists=learner.cont_dists, ddists=learner.disc_dists) for r in rules]
+    simplify = lambda r: r.simplify(cdists=learner.cont_dists, ddists=learner.disc_dists) 
+    rules = map(simplify, rules)
     learner.update_rules(aggerr.agg.shortname, rules)
     _logger.debug("merger\t%s %d rules\t%.4f sec", msg, len(rules), time.time()-start)
 
@@ -308,7 +313,7 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
         pairs = zip(clusters, idxkeys)
 
         for key, g in groupby(pairs, key=lambda p: p[1]):
-          added = merger.add_clusters(list(g), partitionkey=key)
+          added = merger.add_clusters(pick(g, 0), idx=0, partitionkey=key)
 
         if added:
           update_status("added")
@@ -401,7 +406,9 @@ def sort_rules(rules, learner):
   threshold = THRESHOLD * mean_val
 
   def f(c):
-    infs = filter(lambda v: abs(v) != float('inf'), c.inf_state[0])
+    infs = None
+    if c.inf_state:
+      infs = filter(lambda v: abs(v) != float('inf'), c.inf_state[0])
     if not infs:
       return -1e10
     return max(infs) - threshold

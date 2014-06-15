@@ -35,7 +35,8 @@ class StreamRangeMerger(RangeMerger2):
 
     # all values for each dimension
     self.all_cont_vals = defaultdict(set) # idx -> values
-    self.all_disc_vals = defaultdict(set) # name -> values
+    # name -> { val -> [sum, count] }
+    self.all_disc_vals = defaultdict(lambda: defaultdict(lambda: [0,0])) 
 
     # name -> { val -> # times failed }
     self.failed_disc_vals = defaultdict(lambda: defaultdict(lambda:0))
@@ -56,7 +57,7 @@ class StreamRangeMerger(RangeMerger2):
 
   def get_frontier_obj(self, version):
     while version >= len(self.frontiers):
-      self.frontiers.append(ContinuousFrontier(self.c_range, 0.05))
+      self.frontiers.append(CheapFrontier(self.c_range, K=2, nblocks=30))
     return self.frontiers[version]
 
   @property
@@ -86,9 +87,13 @@ class StreamRangeMerger(RangeMerger2):
         self.all_cont_vals[idx].add(c.bbox[1][idx])
       for disc, vals in c.discretes.iteritems():
         if len(vals) < 3:
-          self.all_disc_vals[disc].update([(v,) for v in vals])
+          vals = [(v,) for v in vals]
         else:
-          self.all_disc_vals[disc].add(tuple(vals))
+          vals = [tuple(vals)]
+        for v in vals:
+          self.all_disc_vals[disc][v][0] += c.inf_func(0.1)
+          self.all_disc_vals[disc][v][1] += 1
+        #self.all_disc_vals[disc].update(vals)
 
     return clusters
 
@@ -96,8 +101,12 @@ class StreamRangeMerger(RangeMerger2):
     clusters = set()
     for frontier in self.frontier_iter:
       clusters.update(frontier.frontier)
+
     if prune:
+      for c in clusters:
+        c.c_range = list(self.c_range)
       clusters = self.get_frontier(clusters)[0]
+      clusters = filter(lambda c: r_vol(c.c_range), clusters)
 
     if self.DEBUG:
       self.renderer.new_page()
@@ -242,15 +251,19 @@ class StreamRangeMerger(RangeMerger2):
 
     for name, vals in cluster.discretes.iteritems():
       ret = []
-      for disc_vals in self.all_disc_vals[name]:
+      vals2infs = self.all_disc_vals[name].items()
+      vals2infs.sort(key=lambda p: p[1][0] / float(p[1][1]+1.), reverse=True)
+      for disc_vals, score in vals2infs:
         subset = set(disc_vals).difference(vals)
-        subset.difference_update([v for v in subset if self.failed_disc_vals[name][str(v)] > 5])
+        subset.difference_update([v for v in subset if self.failed_disc_vals[name][str(v)] > 1])
         ret.append(subset)
       ret = filter(bool, ret)
-      ret.sort(key=len)
-      yield name, 'disc', ret
 
-    
+      if ret:
+        p = np.arange(len(ret), 0, -1).astype(float)
+        p /= p.sum()
+        ret = np.random.choice(ret, min(len(ret), 10), p=p, replace=False)
+        yield name, 'disc', ret
 
   def check_direction(self, cluster, dim, direction, vals):
     key = cluster.bound_hash
@@ -268,9 +281,7 @@ class StreamRangeMerger(RangeMerger2):
         vals = filter(lambda v: v < min(cont_vals), vals)
     return vals
 
-  def update_rejected_directions(self, cluster, dim, direction, ok, val):
-    key = cluster.bound_hash
-
+  def update_rejected_directions(self, cluster, dim, direction, val):
     if direction == 'disc':
       for v in list(val):
         self.rejected_disc_vals[dim].append(set([v]))
@@ -283,15 +294,16 @@ class StreamRangeMerger(RangeMerger2):
   @instrument
   def greedy_expansion(self, cluster, seen, version=None, frontier=None):
     _logger.debug("merger\tgreedy_expand\t%s", cluster.rule.simplify())
-    if not frontier:
+    if frontier is None:
       self.rejected_disc_vals = defaultdict(list)
       self.rejected_cont_vals = defaultdict(set)
 
-      frontier = ContinuousFrontier(self.c_range, 0.05)
+      frontier = CheapFrontier(self.c_range, K=1, nblocks=15)
       frontier.update([cluster])
 
     cols = cluster.cols
     for dim, direction, vals in self.dims_to_expand(cluster, seen, version=version):
+      if len(vals) == 0: continue
       attrname = isinstance(dim, basestring) and dim or cols[dim]
       vals = self.check_direction(cluster, dim, direction, vals)
       realvals = self.pick_expansion_vals(cluster, dim, direction, vals)
@@ -310,18 +322,19 @@ class StreamRangeMerger(RangeMerger2):
           _logger.debug("merger\tnoexpand\t%s\t%s\t%s options", attrname[:15], direction, len(vals))
           continue
 
-        expanded, _ = frontier.update([tmp])
-        _logger.debug("merger\tcand\t%s\t%s\t%s\t%s", attrname[:15], direction, bool(expanded), v)
+        frontier.update([tmp])
+        isbetter = tmp in frontier
+        _logger.debug("merger\tcand\t%s\t%s\t%s\t%s", attrname[:15], direction, isbetter, v)
  
-        if not expanded:
-          seen.add(tmp.bound_hash)
-          self.update_rejected_directions(cluster, dim, direction, True, v)
+        seen.add(tmp.bound_hash)
+        if not isbetter:
+          self.update_rejected_directions(cluster, dim, direction, v)
           if direction != 'disc':
             nfails += 1
             if nfails > 1:
               break
-
-        cluster = tmp
+        else:
+          cluster = tmp
 
     for c in frontier.frontier:
       c.c_range = list(self.c_range)
@@ -338,7 +351,7 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
   def get_frontier_obj(self, version, partitionkey):
     frontiers = self.frontiers[partitionkey]
     while version >= len(frontiers):
-      frontiers.append(ContinuousFrontier(self.c_range, 0.05))
+      frontiers.append(CheapFrontier(self.c_range, K=2, nblocks=30))
     return frontiers[version]
   
   @property
@@ -354,10 +367,26 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
 
     if not clusters: return []
 
+
+    if self.DEBUG:
+      print "add %d clusters" % len(clusters)
+      self.renderer.new_page()
+      self.renderer.set_title("add_clusters %d clusters" % len(clusters))
+      for f in self.frontier_iter:
+        self.renderer.plot_inf_curves(f.frontier, color='grey') 
+      self.renderer.plot_inf_curves(clusters, color='green')
+
     nclusters = len(clusters)
     clusters = self.setup_stats(clusters)
     frontier = self.get_frontier_obj(idx, partitionkey)
     clusters, _ = frontier.update(clusters)
+
+    if self.DEBUG:
+      print "base_frontier"
+      self.print_clusters(clusters)
+      self.renderer.plot_active_inf_curves(clusters, color='red')
+
+
 
     # clear out current tasks
     tkey = (partitionkey, idx)

@@ -482,25 +482,20 @@ class Cluster(object):
       return '%.6f\t%s\t%s\t%s' % args
 
   def __hash__(self):
-      if self.hash is None:
-        state = ()
-        if self.inf_state:
-          state = tuple(map(tuple, self.inf_state))
-
-        #self.hash = hash((tuple(self.c_range), state, self.bbox, str(sorted(self.discretes.items()))))
-        discretes = []
-        for dkey in sorted(self.discretes.keys()):
-          discretes.append(dkey)
-          discretes.append(":::")
-          discretes.extend(map(hash, sorted(self.discretes[dkey]))) 
-        self.hash = hash((self.bbox, str(discretes)))
-      return self.hash
+    if self.hash is None:
+      self.hash = self.bound_hash
+    return self.hash
 
 
   @property
   def bound_hash(self):
     if self._bound_hash is None:
-        self._bound_hash = hash((self.bbox, str(self.discretes)))
+      discretes = []
+      for dkey in sorted(self.discretes.keys()):
+        discretes.append(dkey)
+        discretes.append(":::")
+        discretes.extend(map(hash, sorted(self.discretes[dkey]))) 
+      self._bound_hash = hash((self.bbox, str(discretes)))
     return self._bound_hash
 
   def __eq__(self, o):
