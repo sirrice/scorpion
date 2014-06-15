@@ -69,7 +69,9 @@ class Frontier(object):
 
     frontier = self.get_frontier(clusters)
     ret = self.frontier_to_clusters(frontier)
-    rms = set(clusters).difference(zip(*frontier)[0])
+    rms = set(clusters)
+    if frontier:
+      rms.difference_update(zip(*frontier)[0])
     for rm in rms:
       rm.c_range = [rm.c_range[0], rm.c_range[0]]
     return ret, rms
