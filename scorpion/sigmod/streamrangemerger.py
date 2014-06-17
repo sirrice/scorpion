@@ -353,7 +353,7 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
   def get_frontier_obj(self, version, partitionkey):
     frontiers = self.frontiers[partitionkey]
     while version >= len(frontiers):
-      frontiers.append(CheapFrontier(self.c_range, K=1, nblocks=30))
+      frontiers.append(CheapFrontier(self.c_range, K=1, nblocks=40))
     return frontiers[version]
   
   @property

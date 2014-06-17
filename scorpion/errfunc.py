@@ -9,20 +9,26 @@ def compute_bad_inf(bdelta, bcount, c):
 compute_bad_inf = np.vectorize(compute_bad_inf)
 
 def compute_bad_score(bds, bcs, c, smooth=0.015):
-  if not bds or len(filter(bool, bcs)) == 0: 
+  bcs = np.array(bcs).astype(float)
+
+  if not bds or not bcs.any():
     return c * -float('inf')
 
   topbots = zip(bds, bcs)
   binfs = [compute_bad_inf(top, bot, c) for top, bot in topbots]
   binfs = np.array(binfs)
 
-  bcs = np.array(bcs)
   bcs[bcs > 0] = 1
   bcs[bcs <= 0] = smooth
   weights = bcs / bcs.sum()
   try:
     return np.average(binfs, axis=0, weights=weights)
   except:
+    print bcs
+    print weights
+    print bds
+    import traceback
+    traceback.print_exc()
     import pdb
     pdb.set_trace()
 

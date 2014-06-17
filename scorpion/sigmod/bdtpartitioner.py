@@ -87,7 +87,7 @@ class BDTTablesPartitioner(Basic):
         Basic.set_params(self, **kwargs)
 
         self.p = kwargs.get('p', 0.6)
-        self.tau = kwargs.get('tau', [0.001, 0.15])
+        self.tau = kwargs.get('tau', [0.001, 0.09])
         self.epsilon = kwargs.get('epsilon', 0.005)
         self.partition_min_pts = 2
         self.min_pts = 5
@@ -237,7 +237,6 @@ class BDTTablesPartitioner(Basic):
             self.inf_bounds[idx][1] = max(influence, self.inf_bounds[idx][1])
        return row[self.SCORE_ID].value
 
-    @instrument
     def compute_threshold(self, infmax, idx):
         infl, infu = tuple(self.inf_bounds[idx])
         tau, p = self.tau, self.p
