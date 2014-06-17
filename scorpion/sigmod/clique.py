@@ -151,6 +151,8 @@ class MR(Basic):
 
       for attr, ro in self.make_rules(rules):
         nseen += 1
+        if nseen % 50 == 0 and nseen > 0:
+          self.update_status("bottomup processed %d rules" % nseen)
         if self.stop:
             break
 
@@ -194,13 +196,6 @@ class MR(Basic):
     self.cost_clique = time.time() - self.start
 
     #self.cache_results(clusters)
-
-  def blah_to_cluster(self, blah):
-    rule = blah.rule
-    fill_in_rules([rule], self.full_table, self.cols)
-    c = Cluster.from_rule(rule, self.cols)
-    c.error = self.influence_cluster(c, self.full_table)
-    return c
 
   def prune_rule(self, ro):
     if ro.npts < self.min_pts:
