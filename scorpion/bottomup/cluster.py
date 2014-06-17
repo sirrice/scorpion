@@ -298,16 +298,17 @@ class Cluster(object):
 
     return n_intersect + n_close == N and n_close <= 1
 
-  def inf_dominates(self, o, alpha=0):
+  def inf_dominates(self, o, alpha=0, c_range=None):
     """
     Sample c values along both influence curves and ensure that
     this cluster's influence values are 
     """
-    bound = r_union(self.c_range, o.c_range)
-    xs = ((np.arange(10)/10.) * r_vol(bound)) + bound[0]
+    if c_range is None:
+      c_range = r_union(self.c_range, o.c_range)
+    xs = ((np.arange(20)/20.) * r_vol(c_range)) + c_range[0]
     mine = self.inf_func(xs)
     theirs = o.inf_func(xs) * (1.0 + alpha)
-    return (mine > theirs).all()
+    return (mine >= theirs).all()
 
   def contains(self, o, epsilon=0.):
     if not box_contained(o.bbox, self.bbox, epsilon=epsilon):
