@@ -403,27 +403,28 @@ class CheapFrontier(Frontier):
     return infs
 
   @instrument
-  def compute_thresholds(self, all_infs, thresholds=None):
+  def compute_thresholds(self, all_infs, thresholds=None, K=None):
     if thresholds is None:
       thresholds = np.zeros(self.nblocks).astype(float)
       thresholds[:] = -1e100
+    if K is None:
+      K = self.K
 
     ret = []
     for bidx, bucket in enumerate(self.buckets):
       bucket_infs = all_infs[:, bidx]
-      if len(bucket_infs) <= self.K:
+      if len(bucket_infs) <= K:
         thresh = bucket_infs.min()
       else:
-        idx = np.argpartition(bucket_infs, -self.K)[-self.K]
+        idx = np.argpartition(bucket_infs, -K)[-K]
         thresh = bucket_infs[idx]
-        #thresh = np.percentile(bucket_infs, 90)
       thresholds[bidx] = max(thresholds[bidx], thresh)
 
     return thresholds
 
 
   @instrument
-  def _get_frontier(self, clusters):
+  def _get_frontier(self, clusters, K=None):
     if len(clusters) == 0:
       return []
     if len(clusters) == 1:
@@ -436,7 +437,7 @@ class CheapFrontier(Frontier):
     except Exception as e:
       print e
       print all_infs
-    thresholds = self.compute_thresholds(all_infs)
+    thresholds = self.compute_thresholds(all_infs, K=K)
 
 
     # all_infs is a clusters x buckets matrix
@@ -484,7 +485,7 @@ class CheapFrontier(Frontier):
 
 
   @instrument
-  def update(self, clusters):
+  def update(self, clusters, K=None):
     clusters = self(clusters)[0]
     if len(clusters) == 0: 
       return set(), set()
@@ -496,7 +497,7 @@ class CheapFrontier(Frontier):
     all_infs = np.array(arg_infs)
     all_clusters = list(clusters)
     all_clusters.extend(self.frontier)
-    self.thresholds = self.compute_thresholds(all_infs)
+    self.thresholds = self.compute_thresholds(all_infs, K=K)
     spans = self.all_infs_to_spans(all_clusters, all_infs, self.thresholds)
 
     span_hashes = set([tup[0].bound_hash for tup in spans])
