@@ -253,11 +253,16 @@ class StreamRangeMerger(RangeMerger2):
 
     for name, vals in cluster.discretes.iteritems():
       ret = []
+      maxval = vals and max(vals) or None
       vals2infs = self.all_disc_vals[name].items()
       vals2infs.sort(key=lambda p: p[1][0] / float(p[1][1]+1.), reverse=True)
+
       for disc_vals, score in vals2infs:
         subset = set(disc_vals).difference(vals)
         subset.difference_update([v for v in subset if self.failed_disc_vals[name][str(v)] > 1])
+        # create an ordering on values, can only add larger vals
+        if maxval is not None:
+          subset.difference_update([v for v in subset if v < maxval])
         ret.append(subset)
       ret = filter(bool, ret)
 
@@ -335,8 +340,8 @@ class StreamRangeMerger(RangeMerger2):
             nfails += 1
             if nfails > 1:
               break
-        else:
-          cluster = tmp
+        #else:
+        cluster = tmp
 
     for c in frontier.frontier:
       c.c_range = list(self.c_range)
@@ -353,7 +358,7 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
   def get_frontier_obj(self, version, partitionkey):
     frontiers = self.frontiers[partitionkey]
     while version >= len(frontiers):
-      frontiers.append(CheapFrontier(self.c_range, K=1, nblocks=40))
+      frontiers.append(CheapFrontier(self.c_range, K=1, nblocks=30))
     return frontiers[version]
   
   @property

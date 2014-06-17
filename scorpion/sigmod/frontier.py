@@ -333,6 +333,7 @@ class CheapFrontier(Frontier):
   In practice, >40 c values gets pretty good results.
   Ends up being faster than the above root-finding-based approaches
   """
+  buckets_cache = {}
 
   def __init__(self, c_range, min_granularity=0, K=3, nblocks=100):
     """
@@ -343,16 +344,57 @@ class CheapFrontier(Frontier):
     Frontier.__init__(self, c_range, min_granularity=min_granularity)
 
     self.nblocks = nblocks
-    xs = np.arange(nblocks).astype(float) / nblocks
-    self.blocksize = r_vol(c_range) / float(nblocks)
-    self.buckets = (xs * r_vol(c_range)) + c_range[0]
+    #xs = np.arange(nblocks).astype(float) / nblocks
+    #self.blocksize = r_vol(c_range) / float(nblocks)
+    #self.buckets = (xs * r_vol(c_range)) + c_range[0]
+    self.buckets = self.compute_normalized_buckets(nblocks)
+    self.buckets = (self.buckets * r_vol(c_range)) + c_range[0]
+    self.nblocks = len(self.buckets)
     self.bests = defaultdict(list)   # bucket -> clusters
     self.K = K
 
     self.frontier = []
     self.frontier_hashes = []
     self.frontier_infs = []
-    self.threshold = np.zeros(nblocks).astype(float)
+    self.threshold = np.zeros(self.nblocks).astype(float)
+    self.seen = set()
+
+  def compute_normalized_buckets(self, nblocks):
+    """
+    return distribution of x buckets, normalized to be between 0 and 1
+    """
+    if nblocks in CheapFrontier.buckets_cache:
+      return CheapFrontier.buckets_cache[nblocks]
+  
+    def mkf(pairs):
+      return np.vectorize(lambda c: np.mean([t/pow(b,c) for t,b in pairs]) )
+
+    inf_funcs = []
+    while len(inf_funcs) < 200:
+      tops = np.random.rand(5) * 20
+      bots = np.random.rand(5) * 20 + 1.
+      pairs = zip(tops, bots)
+      inf_funcs.append(mkf(pairs))
+
+    nblocks = int(nblocks)
+    xs = np.arange(nblocks * 2).astype(float) / (nblocks * 2.)
+    all_infs = np.array([inf_func(xs) for inf_func in inf_funcs])
+    medians = np.percentile(all_infs, 50, axis=0)
+    block = (medians.max() - medians.min()) / nblocks
+    optxs = []
+    ys = []
+    prev = None
+    for idx, v in enumerate(medians):
+      if prev == None or abs(v - prev) >= block:
+        optxs.append(xs[idx])
+        ys.append(v)
+        prev = v
+    optxs = np.array(optxs)
+    optxs -= optxs.min()
+    optxs /= optxs.max()
+
+    CheapFrontier.buckets_cache[nblocks] = optxs
+    return optxs
 
   @instrument
   def cluster_infs(self, c):
@@ -364,6 +406,7 @@ class CheapFrontier(Frontier):
   def compute_thresholds(self, all_infs, thresholds=None):
     if thresholds is None:
       thresholds = np.zeros(self.nblocks).astype(float)
+      thresholds[:] = -1e100
 
     ret = []
     for bidx, bucket in enumerate(self.buckets):
@@ -423,7 +466,11 @@ class CheapFrontier(Frontier):
       else:
         if sidx is not None:
           start = self.buckets[sidx]
-          end = self.buckets[bidx-1] + self.blocksize
+          end = self.buckets[bidx-1]
+          if bidx < len(self.buckets):
+            end = self.buckets[bidx]
+          else:
+            end = self.c_range[1]
           #print '%.2f-%.2f\t%s' % (start, end, cluster.rule)
           ret.append((cluster, start, end))
           sidx = None
@@ -442,6 +489,7 @@ class CheapFrontier(Frontier):
     if len(clusters) == 0: 
       return set(), set()
     
+    clusters = [c for c in clusters if c.bound_hash not in self.seen]
 
     arg_infs = [self.cluster_infs(c) for c in clusters]
     arg_infs.extend(self.frontier_infs)
@@ -465,6 +513,8 @@ class CheapFrontier(Frontier):
       self.frontier_infs.append(hash2infs.get(h, self.cluster_infs(c)))
     self.frontier_hashes = set(self.frontier_hashes)
 
+    for c in clusters:
+      self.seen.add(c.bound_hash)
     return adds, rms
 
   def __contains__(self, c):

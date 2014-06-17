@@ -456,15 +456,17 @@ def group_to_rule(clusters):
   """
   _logger.debug("groupclust\tgroup->rule\t%d clusters", len(clusters))
   if len(clusters) == 0: return None
+  for c in clusters:
+    _logger.debug("groupclust\t\t%s", c)
 
   clusters = sorted(clusters, key=lambda c: r_vol(c.c_range), reverse=True)
   rule = clusters[0].rule
   rule.c_range = list(clusters[0].c_range)
+  rule.cluster_rules = []
   for c in clusters[1:]:
-    rule.cluster_rules = []
     rule.cluster_rules.append(c.rule)
-  return rule
 
+  return rule
 
 def group_by_inf_state(clusters, learner):
   """
@@ -472,7 +474,7 @@ def group_by_inf_state(clusters, learner):
   identical influence states
   """
   mean_val = np.median([ef.value for ef in learner.bad_err_funcs])
-  block = mean_val / 10.
+  block = mean_val / 30.
   def trunc(v):
     if abs(v) == float('inf'):
       return 'inf'

@@ -512,7 +512,7 @@ class SDRule(object) :
   def to_json(self):
     return {
       #'conds': self.toCondDicts(),
-      'clauses': self.toCondDicts(),
+      'clauses': self.cond_dicts,
       'count': len(self.examples),
       'c_range': self.c_range,
       'quality': self.quality,

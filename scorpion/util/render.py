@@ -131,6 +131,23 @@ class InfRenderer(BaseRenderer):
   def new_page(self):
     BaseRenderer.new_page(self)
 
+  def plot_points(self, xs, ys, color='grey', alpha=0.3):
+    self.sub.plot(xs, ys, color=color, alpha=alpha)
+
+    ys = filter(lambda v: abs(v) != float('inf'), ys)
+    if len(ys): 
+      if not self.ybound:
+        self.xbound = [min(xs), max(xs)]
+        self.ybound = [ min(ys), max(ys) ]
+      else:
+        inf_range = [min(ys), max(ys)]
+        self.xbound = [min(self.xbound[0], min(xs)), max(self.xbound[1], max(xs))]
+        self.ybound = [min(self.ybound[0], min(ys)), max(self.ybound[1], max(ys))]
+
+    self.set_lims()
+
+
+
   def plot_active_inf_curves(self, clusters, color='red', alpha=0.3):
     alpha = alpha or 0.3
     color = color or 'red'
