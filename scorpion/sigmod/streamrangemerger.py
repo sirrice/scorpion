@@ -253,16 +253,15 @@ class StreamRangeMerger(RangeMerger2):
 
     for name, vals in cluster.discretes.iteritems():
       ret = []
-      maxval = vals and max(vals) or None
+      maxval = (len(vals) > 1) and max(vals) or None
       vals2infs = self.all_disc_vals[name].items()
       vals2infs.sort(key=lambda p: p[1][0] / float(p[1][1]+1.), reverse=True)
 
       for disc_vals, score in vals2infs:
         subset = set(disc_vals).difference(vals)
         subset.difference_update([v for v in subset if self.failed_disc_vals[name][str(v)] > 1])
-        # create an ordering on values, can only add larger vals
-        if maxval is not None:
-          subset.difference_update([v for v in subset if v < maxval])
+        if maxval:
+          subset = set(filter(lambda v: v >= maxval, subset))
         ret.append(subset)
       ret = filter(bool, ret)
 
