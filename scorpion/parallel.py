@@ -313,7 +313,6 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
         pass
 
     if json_pairs == 'done': 
-      print "merger received DONE message"
       done = True
       json_pairs = []
 
@@ -328,16 +327,12 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
           added = merger.add_clusters(pick(g, 0), idx=0, partitionkey=key)
 
         if added:
-          print "update status added"
           update_status("added")
-          print "done"
 
       if merger.has_next_task():
         _logger.debug("merger\tprocess tasks\t%d tasks left" % merger.ntasks)
         if merger():
-          print "update status updated"
           update_status("updated")
-          print "done"
         else:
           _logger.debug("merger\tno improvements\t%d tasks left", merger.ntasks)
 
