@@ -135,7 +135,9 @@ class MR(Basic):
     added = []
     nseen = 0
     niters = 0 
-    while niters < self.max_complexity and not self.stop and (rules is None or rules):
+    while (niters < self.max_complexity and 
+           not self.stop and 
+           (rules is None or rules)):
       niters += 1
       self.update_status("running bottomup iter %d" % niters)
       _logger.debug("=========iter %d=========", niters)
@@ -153,6 +155,7 @@ class MR(Basic):
         nseen += 1
         if nseen % 50 == 0 and nseen > 0:
           self.update_status("bottomup processed %d rules" % nseen)
+
         if self.stop:
             break
 

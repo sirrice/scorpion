@@ -185,6 +185,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
       json_pairs = [(r.to_json(), idxkey) for r, idxkey in pairs]
       _logger.debug("main\tsend to child proc %d rules" % len(json_pairs))
       par2chq.put(json_pairs)
+      _logger.debug("main\tsent")
     _logger.debug("main\tsend to child proc DONE")
     par2chq.put('done')
     par2chq.close()
@@ -324,7 +325,7 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
         if merger():
           update_status("updated")
         else:
-          _logger.debug("merger\tno improvements")
+          _logger.debug("merger\tno improvements\t%d tasks left", merger.ntasks)
 
     except Exception as e:
       print "problem in merger process"
