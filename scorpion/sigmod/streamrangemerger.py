@@ -425,6 +425,7 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
       if len(ret) >= n: break
       tasks = self.tasks[tkey]
       ntasks = len(tasks)
+      if not ntasks: continue
       idxs = np.random.choice(ntasks, min(ntasks, n-len(ret)), replace=False)
       for idx in reversed(idxs):
         ret.append((tkey[0], tkey[1], tasks.pop(idx)))
