@@ -483,11 +483,14 @@ class CheapFrontier(Frontier):
       ret.append((cluster, self.buckets[sidx], self.c_range[1]))
     return ret
 
-  def improvements(self, cluster1, cluster2):
+  def improvement(self, cluster):
     """
-    cluster1.influence - cluster2.influence for each bucket
+    cluster.influence - frontier for each bucket
     """
-    return self.cluster_infs(cluster1) - self.cluster_infs(cluster2)
+    infs = self.cluster_infs(cluster)
+    if len(self.frontier_infs) == 0:
+      return infs
+    return infs - self.frontier_infs.max(axis=0)
 
   @instrument
   def update(self, clusters, K=None):
@@ -517,6 +520,7 @@ class CheapFrontier(Frontier):
     self.frontier_infs = []
     for h, c in izip(self.frontier_hashes, self.frontier):
       self.frontier_infs.append(hash2infs.get(h, self.cluster_infs(c)))
+    self.frontier_infs = np.array(self.frontier_infs)
     self.frontier_hashes = set(self.frontier_hashes)
 
     for c in clusters:

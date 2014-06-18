@@ -333,6 +333,10 @@ class StreamRangeMerger(RangeMerger2):
           _logger.debug("merger\tnoexpand\t%s\t%s\t%s options", attrname[:15], direction, len(vals))
           continue
 
+        improvements = frontier.improvement(tmp)
+        if improvements.max() > 0:
+          print str(tmp)
+          print "\t", [round(v,2) for v in improvements]
         frontier.update([tmp])
         isbetter = tmp in frontier
         _logger.debug("merger\tcand\t%s\t%s\t%s\t%s", attrname[:15], direction, isbetter, v)
@@ -391,12 +395,12 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
     if not skip_frontier:
       clusters, _ = frontier.update(clusters)
 
-    print "base_frontier"
-    self.print_clusters(clusters)
+    if self.DEBUG or not skip_frontier:
+      print "base_frontier"
+      self.print_clusters(clusters)
+
     if self.DEBUG:
       self.renderer.plot_active_inf_curves(clusters, color='red')
-
-
 
     # clear out current tasks
     tkey = (partitionkey, idx)
@@ -439,10 +443,7 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
       next_frontier = self.get_frontier_obj(idx+1, pkey)
       new_clusters = self.run_task(idx, cluster, cur_frontier, next_frontier)
 
-      debug = self.DEBUG
-      self.DEBUG = False
       self.add_clusters(new_clusters, idx=idx+1, partitionkey=pkey, skip_frontier=True)
-      self.DEBUG = debug
       improvements.update(new_clusters)
 
       _logger.debug("merger\t%s\ttook %.1f sec\t%d improved\t%d tried\t%d tasks left", 
