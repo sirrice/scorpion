@@ -52,6 +52,7 @@ class StreamRangeMerger(RangeMerger2):
     self.K = 1
     self.nblocks = 50
     self.get_frontier = CheapFrontier(self.c_range, K=self.K, nblocks=self.nblocks)
+    self.get_frontier.stats = self.stats
 
 
     if self.DEBUG:
@@ -63,13 +64,16 @@ class StreamRangeMerger(RangeMerger2):
 
   def get_frontier_obj(self, version):
     while version >= len(self.frontiers):
-      self.frontiers.append(CheapFrontier(self.c_range, K=self.K, nblocks=self.blocks))
+      frontier = CheapFrontier(self.c_range, K=self.K, nblocks=self.blocks)
+      frontier.stats = self.stats
+      self.frontiers.append(frontier)
     return self.frontiers[version]
 
   @property
   def frontier_iter(self):
     return list(self.frontiers)
 
+  @instrument
   def setup_stats(self, clusters):
     all_inf = lambda l: all([abs(v) == float('inf') for v in l])
     clusters = filter(lambda c: c.bound_hash not in self.added, clusters)
@@ -103,6 +107,7 @@ class StreamRangeMerger(RangeMerger2):
 
     return clusters
 
+  @instrument
   def best_so_far(self, prune=False):
     clusters = set()
     for frontier in self.frontier_iter:
@@ -121,6 +126,7 @@ class StreamRangeMerger(RangeMerger2):
     return clusters
 
 
+  @instrument
   def add_clusters(self, clusters, idx=0):
     """
     Return list of new clusters that are on the frontier
@@ -279,6 +285,7 @@ class StreamRangeMerger(RangeMerger2):
         ret = np.random.choice(ret, min(len(ret), 10), p=p, replace=False)
         yield name, 'disc', ret
 
+  @instrument
   def check_direction(self, cluster, dim, direction, vals):
     key = cluster.bound_hash
     if direction == 'disc':
@@ -295,6 +302,7 @@ class StreamRangeMerger(RangeMerger2):
         vals = filter(lambda v: v < min(cont_vals), vals)
     return vals
 
+  @instrument
   def update_rejected_directions(self, cluster, dim, direction, val):
     if direction == 'disc':
       for v in list(val):
@@ -310,6 +318,7 @@ class StreamRangeMerger(RangeMerger2):
     _logger.debug("merger\tgreedy_expand\t%s", cluster.rule.simplify())
     if frontier is None:
       frontier = CheapFrontier(self.c_range, K=1, nblocks=15)
+      frontier.stats = self.stats
       frontier.update([cluster])
 
     cols = cluster.cols
@@ -364,13 +373,16 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
   def get_frontier_obj(self, version, partitionkey):
     frontiers = self.frontiers[partitionkey]
     while version >= len(frontiers):
-      frontiers.append(CheapFrontier(self.c_range, K=self.K, nblocks=self.nblocks))
+      frontier = CheapFrontier(self.c_range, K=self.K, nblocks=self.nblocks)
+      frontier.stats = self.stats
+      frontiers.append(frontier)
     return frontiers[version]
   
   @property
   def frontier_iter(self):
     return chain(*self.frontiers.values())
 
+  @instrument
   def add_clusters(self, 
       clusters, idx=0, partitionkey=None, skip_frontier=False):
     """
@@ -395,7 +407,7 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
     if not skip_frontier:
       clusters, _ = frontier.update(clusters)
 
-    if self.DEBUG or not skip_frontier:
+    if self.DEBUG and not skip_frontier:
       print "base_frontier"
       self.print_clusters(clusters)
 

@@ -34,7 +34,6 @@ class Cluster(object):
       self.bbox = bbox and (tuple(bbox[0]), tuple(bbox[1])) or ((),())
       self.discretes = defaultdict(set)
       self.cols = cols
-      self.centroid = tuple([np.mean((p1, p2)) for p1, p2 in zip(*self.bbox)])
       self.parents = parents or []
       self.npts = kwargs.get('npts', 1)
       self.kwargs = kwargs

@@ -209,11 +209,17 @@ class Merger(object):
       if seen and merged.bound_hash in seen: 
         return None
       merged.rule = None
+
       start = time.time()
       merged.rule = merged.to_rule(self.learner.full_table)
       self.stats['merged.to_rule'][0] += time.time() - start
       self.stats['merged.to_rule'][1] += 1
+
+      start = time.time()
       merged.error = self.influence(merged)
+      self.stats['merged.influence'][0] += time.time() - start
+      self.stats['merged.influence'][1] += 1
+
       merged.parents = [cluster]
       self.nmerged += 1
       if abs(merged.error) == float('inf'):

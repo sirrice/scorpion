@@ -230,7 +230,7 @@ class Basic(object):
     lens = []
     for idx, (ef, data) in enumerate(zip(err_funcs, datas)):
       if len(data) == len(tables[idx]):
-        influence = -float('infinity')
+        influence = -INF
       else:
         arr = data.to_numpyMA('ac')[0]
         influence = ef(arr.data)
