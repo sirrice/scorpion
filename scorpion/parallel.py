@@ -277,7 +277,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
 
 def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   valid_cluster_f = lambda c: True
-	status = Status(learner.obj.reqid)
+  status = Status(learner.obj.reqid)
 
   def update_status(msg):
     start = time.time()
@@ -349,7 +349,7 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   out_conn.put([c.rule.to_json() for c in merged])
   in_conn.close()
   out_conn.close()
-	status.close()
+  status.close()
 
   for key, (cost, count) in merger.stats.iteritems():
     print "%.5f\t%s\t%s" % (cost, key, count)
