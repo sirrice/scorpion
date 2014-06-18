@@ -483,6 +483,11 @@ class CheapFrontier(Frontier):
       ret.append((cluster, self.buckets[sidx], self.c_range[1]))
     return ret
 
+  def improvements(self, cluster1, cluster2):
+    """
+    cluster1.influence - cluster2.influence for each bucket
+    """
+    return self.cluster_infs(cluster1) - self.cluster_infs(cluster2)
 
   @instrument
   def update(self, clusters, K=None):

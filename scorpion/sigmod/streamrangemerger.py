@@ -217,7 +217,9 @@ class StreamRangeMerger(RangeMerger2):
       self.renderer.set_title("expand %s" % str(cluster.rule))
       self.renderer.plot_inf_curves([cluster], color='grey') 
 
-    expanded = self.greedy_expansion(cluster, self.seen, idx, None)
+    self.rejected_disc_vals = defaultdict(list)
+    self.rejected_cont_vals = defaultdict(set)
+    expanded = self.greedy_expansion(cluster, self.seen, idx, cur_frontier)
     expanded = [c for c in expanded if c.bound_hash != cluster.bound_hash]
 
     if self.DEBUG:
@@ -307,9 +309,6 @@ class StreamRangeMerger(RangeMerger2):
   def greedy_expansion(self, cluster, seen, version=None, frontier=None):
     _logger.debug("merger\tgreedy_expand\t%s", cluster.rule.simplify())
     if frontier is None:
-      self.rejected_disc_vals = defaultdict(list)
-      self.rejected_cont_vals = defaultdict(set)
-
       frontier = CheapFrontier(self.c_range, K=1, nblocks=15)
       frontier.update([cluster])
 
@@ -345,11 +344,9 @@ class StreamRangeMerger(RangeMerger2):
             nfails += 1
             if nfails > 1:
               break
-        #else:
-      	#cluster = tmp
+        if direction != 'disc':
+          cluster = tmp
 
-    for c in frontier.frontier:
-      c.c_range = list(self.c_range)
     return frontier.frontier
 
 
@@ -379,7 +376,6 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
       raise RuntimeError('addclusters partitionkey cannot be none')
 
     if not clusters: return []
-
 
     print "add %d clusters" % len(clusters)
     if self.DEBUG:
