@@ -184,17 +184,17 @@ def serial_hybrid(obj, aggerr, **kwargs):
     for pairs in learner(all_full_table, bad_tables, good_tables):
       if not pairs: continue
 
-        json_pairs = [(r.to_json(), idxkey) for r, idxkey in pairs]
-        _logger.debug("main\tsend to child proc %d rules" % len(json_pairs))
-        try:
-          par2chq.put(json_pairs, False)
-          _logger.debug("main\tsent")
-        except Queue.Full:
-          all_json_pairs.extend(json_pairs)
-          _logger.debug("main\itq full")
+      json_pairs = [(r.to_json(), idxkey) for r, idxkey in pairs]
+      _logger.debug("main\tsend to child proc %d rules" % len(json_pairs))
+      try:
+				par2chq.put(json_pairs, False)
+				_logger.debug("main\tsent")
+      except Queue.Full:
+				all_json_pairs.extend(json_pairs)
+				_logger.debug("main\itq full")
 
     _logger.debug("main\tsend last batch to merger %d rules", len(all_json_pairs))
-        par2chq.put(json_pairs)
+    par2chq.put(all_json_pairs)
     _logger.debug("main\tsend to child proc DONE")
     par2chq.put('done')
     par2chq.close()
