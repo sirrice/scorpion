@@ -319,29 +319,25 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
 
     try:
       if json_pairs:
-				print "rules to clusters"
         pairs = [(SDRule.from_json(d, learner.full_table), keyidx) for d, keyidx in json_pairs]
         rules, idxkeys = tuple(zip(*pairs))
         clusters = rules_to_clusters(rules, learner)
         pairs = zip(clusters, idxkeys)
-				print "adding clusters by group"
 
         for key, g in groupby(pairs, key=lambda p: p[1]):
           added = merger.add_clusters(pick(g, 0), idx=0, partitionkey=key)
 
         if added:
-					print "update status added"
+          print "update status added"
           update_status("added")
-					print "done"
+          print "done"
 
-			print "check has next task"
       if merger.has_next_task():
         _logger.debug("merger\tprocess tasks\t%d tasks left" % merger.ntasks)
-				print "run merger()"
         if merger():
-					print "update status updated"
+          print "update status updated"
           update_status("updated")
-					print "done"
+          print "done"
         else:
           _logger.debug("merger\tno improvements\t%d tasks left", merger.ntasks)
 

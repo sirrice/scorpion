@@ -1,9 +1,10 @@
 import json
 from sqlalchemy import create_engine
+from sqlalchemy.pool import NullPool
 
 class Status(object):
   def __init__(self, reqid=None):
-    self.engine = create_engine("postgresql://localhost/status")
+    self.engine = create_engine("postgresql://localhost/status", poolclass=NullPool)
     self.db = self.engine.connect()
     self.create_table()
     self.reqid = reqid
