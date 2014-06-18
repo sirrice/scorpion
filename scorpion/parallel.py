@@ -277,7 +277,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
 
 def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   valid_cluster_f = lambda c: True
-  status = Status(learner.obj.reqid)
+  status = Status(learner.obj.status.reqid)
 
   def update_status(msg):
     start = time.time()
