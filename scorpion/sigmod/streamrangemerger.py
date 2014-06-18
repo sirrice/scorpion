@@ -422,10 +422,12 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
   def next_tasks(self, n=1):
     ret = []
     for tkey in reversed(self.tasks.keys()):
+      if len(ret) >= n: break
       tasks = self.tasks[tkey]
-      while len(ret) < n and tasks:
-        idx = random.randint(-1, len(tasks)-1)
-        ret.append((tkey[0], idx, tasks.pop(idx)))
+      ntasks = len(tasks)
+      idxs = np.random.choice(ntasks, min(ntasks, n-len(ret)), replace=False)
+      for idx in reversed(idxs):
+        ret.append((tkey[0], tkey[1], tasks.pop(idx)))
     return ret
 
 
