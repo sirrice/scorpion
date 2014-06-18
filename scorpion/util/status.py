@@ -74,12 +74,10 @@ class Status(object):
       else:
         jsons.append(rule_to_json(rule, yalias=label))
     val = json.dumps(jsons)
-    print "update_rules.db.execute"
     self.db.execute(q, 
         val, self.reqid, label, 
         self.reqid, label, val, 
         self.reqid, label)
-    print "done"
 
   def get_rules(self):
     q = "select label, val from rules where reqid = %s"
