@@ -217,12 +217,13 @@ def serial_hybrid(obj, aggerr, **kwargs):
     for key, g in groupby(pairs, key=lambda p: p[1]):
       merger.add_clusters(pick(g, 0), idx=0, partitionkey=key)
 
+
     while merger.has_next_task():
-      merger()
-      learner.update_rules(
-        aggerr.agg.shortname, 
-        group_clusters(merger.best_so_far(), learner)
-      )
+			if merger():
+				learner.update_rules(
+					aggerr.agg.shortname, 
+					group_clusters(merger.best_so_far(), learner)
+				)
     clusters = merger.best_so_far(True)
     merger.close()
 
@@ -390,9 +391,9 @@ def get_hierarchies(clusters):
   child2parent = {}
   for idx, c1 in enumerate(clusters):
     for c2 in clusters[idx+1:]:
-      if c1.contains(c2) and c1.inf_dominates(c2, 0):
+      if c1.contains(c2) and c1.inf_dominates(c2, .01, c_range=c2.c_range):
         child2parent[c2] = c1
-      elif c2.contains(c1) and c2.inf_dominates(c1):
+      elif c2.contains(c1) and c2.inf_dominates(c1, .01, c_range=c1.c_range):
         child2parent[c1] = c2
   return child2parent
 
@@ -429,24 +430,29 @@ def merge_clauses(clusters):
     clusters[0].rule.c_range = clusters[0].c_range
     return clusters[0]
 
+
+  mainc = clusters[0]
+  domain = mainc.rule.data.domain
   conds = {}
   for c in clusters:
-    for cond in c.rule.filter.conditions:
-      key = c.rule.condToString(cond)
-      conds[key] = cond
+    for d in c.rule.cond_dicts:
+      col = d['col']
+      if col not in conds:
+        conds[col] = d
+        continue
 
-  conds = conds.values()
-  mainc = clusters[0]
-  rule = SDRule(mainc.rule.data, None, conds, None)
-  rule.c_range = list(mainc.c_range)
-  rule.quality = mainc.error
+      if d['type'] == 'num':
+        conds[col]['vals'] = r_intersect(conds[col]['vals'], d['vals'])
+      else:
+        conds[col]['vals'] = set(conds[col]['vals']).intersection(d['vals'])
+
+  j = mainc.rule.to_json()
+  j['clauses'] = conds.values()
+  rule = SDRule.from_json(j, data=mainc.rule.data)
   c = Cluster.from_rule(rule, mainc.cols)
-  c.c_range = list(mainc.c_range)
-  c.inf_state = map(tuple, mainc.inf_state)
   c.inf_func = mainc.inf_func
   c.error = mainc.error
   return c
-
 
 
 def group_to_rule(clusters):
@@ -473,16 +479,20 @@ def group_by_inf_state(clusters, learner):
   super stupid check to group rules that have 
   identical influence states
   """
-  mean_val = np.median([ef.value for ef in learner.bad_err_funcs])
-  block = mean_val / 30.
-  def trunc(v):
+  errtype = learner.bad_err_funcs[0].errtype.errtype
+  get_errval = lambda ef: ef.value
+  if errtype == ErrTypes.EQUALTO:
+    get_errval = lambda ef: ef.errtype(ef.value, ef.errtype.erreq)
+  efs = np.array(map(get_errval, learner.bad_err_funcs))
+  blocks = efs / 30.
+  def trunc((idx,v)):
     if abs(v) == float('inf'):
       return 'inf'
-    return int(float(v) / block)
+    return int(float(v) / blocks[idx])
 
   def f(c):
-    bad_infs =  tuple(map(trunc, c.inf_state[0]))
-    good_infs = tuple(map(trunc, c.inf_state[2]))
+    bad_infs =  tuple(map(trunc, enumerate(c.inf_state[0])))
+    good_infs = tuple(c.inf_state[2])
     return (bad_infs, good_infs)
   return group_by_features(clusters, f)
 

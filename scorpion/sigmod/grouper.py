@@ -40,7 +40,8 @@ class Blah(object):
     l = mr.l
 
     good_infs = [abs(gd) for gd,gc in zip(gds, gcs) if gc]
-    self.maxg = max(good_infs) if good_infs else 0
+    #self.maxg = max(good_infs) if good_infs else 0
+    self.maxg = np.percentile(good_infs, 85) if good_infs else 0
     self.good_inf = (1. - l) * self.maxg
 
     self.bad_inf_func = self.create_bad_inf_func()
@@ -127,6 +128,7 @@ class Blah(object):
         )
     self._rule = SDRule(self.grouper.data, None, conds, None)
     self._rule.quality = self.inf
+    self._rule.inf_state = self.inf_state
 
     return self._rule
   rule = property(__rule__)

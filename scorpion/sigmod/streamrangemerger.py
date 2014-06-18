@@ -28,7 +28,6 @@ _logger = get_logger()
 class StreamRangeMerger(RangeMerger2):
   def __init__(self, *args, **kwargs):
     super(StreamRangeMerger, self).__init__(*args, **kwargs)
-    self.get_frontier = CheapFrontier(self.c_range, K=2, nblocks=30)
 
     self.valid_cluster_f = kwargs.get('valid_cluster_f', lambda c: True)
 
@@ -50,6 +49,11 @@ class StreamRangeMerger(RangeMerger2):
     self.adj_graph = None
 
 
+    self.K = 1
+    self.nblocks = 50
+    self.get_frontier = CheapFrontier(self.c_range, K=self.K, nblocks=self.nblocks)
+
+
     if self.DEBUG:
       self.renderer = InfRenderer('/tmp/merger.pdf', c_range=self.c_range)
 
@@ -59,7 +63,7 @@ class StreamRangeMerger(RangeMerger2):
 
   def get_frontier_obj(self, version):
     while version >= len(self.frontiers):
-      self.frontiers.append(CheapFrontier(self.c_range, K=2, nblocks=30))
+      self.frontiers.append(CheapFrontier(self.c_range, K=self.K, nblocks=self.blocks))
     return self.frontiers[version]
 
   @property
@@ -266,6 +270,8 @@ class StreamRangeMerger(RangeMerger2):
       ret = filter(bool, ret)
 
       if ret:
+        yield name, 'disc', ret
+        return
         p = np.arange(len(ret), 0, -1).astype(float)
         p /= p.sum()
         ret = np.random.choice(ret, min(len(ret), 10), p=p, replace=False)
@@ -340,7 +346,7 @@ class StreamRangeMerger(RangeMerger2):
             if nfails > 1:
               break
         #else:
-        cluster = tmp
+      	#cluster = tmp
 
     for c in frontier.frontier:
       c.c_range = list(self.c_range)
@@ -357,7 +363,7 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
   def get_frontier_obj(self, version, partitionkey):
     frontiers = self.frontiers[partitionkey]
     while version >= len(frontiers):
-      frontiers.append(CheapFrontier(self.c_range, K=1, nblocks=30))
+      frontiers.append(CheapFrontier(self.c_range, K=self.K, nblocks=self.nblocks))
     return frontiers[version]
   
   @property
@@ -375,8 +381,8 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
     if not clusters: return []
 
 
+    print "add %d clusters" % len(clusters)
     if self.DEBUG:
-      print "add %d clusters" % len(clusters)
       self.renderer.new_page()
       self.renderer.set_title("add_clusters %d clusters" % len(clusters))
       for f in self.frontier_iter:
@@ -389,9 +395,9 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
     if not skip_frontier:
       clusters, _ = frontier.update(clusters)
 
+    print "base_frontier"
+    self.print_clusters(clusters)
     if self.DEBUG:
-      print "base_frontier"
-      self.print_clusters(clusters)
       self.renderer.plot_active_inf_curves(clusters, color='red')
 
 

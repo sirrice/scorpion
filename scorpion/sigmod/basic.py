@@ -159,7 +159,8 @@ class Basic(object):
 
     l = self.l
     vs = [abs(gv) for gv, gc in zip(inf_state[2], inf_state[3]) if gc]
-    maxg = max(vs) if vs else 0
+    #maxg = max(vs) if vs else 0
+    maxg = np.percentile(vs, 85) if vs else 0
 
     bds, bcs = [], []
     for idx in xrange(len(inf_state[0])):
