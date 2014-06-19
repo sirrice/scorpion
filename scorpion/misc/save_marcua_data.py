@@ -6,7 +6,7 @@ from datasets import data_iterator
 import matplotlib.pyplot as plt
 from collections import *
 
-from db import *
+from scorpionsql.db import *
 
 
 def load_marcua_dataset():

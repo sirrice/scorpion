@@ -9,11 +9,11 @@ sys.path.extend(['.', '..'])
 
 from collections import Counter, defaultdict
 from itertools import chain
+from scorpionsql.aggerror import *
 
 from ..settings import *
 from ..util import *
 from ..split import *
-from ..aggerror import *
 from ..learners.cn2sd.refiner import *
 
 _logger = get_logger()

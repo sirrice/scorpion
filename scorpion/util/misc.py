@@ -9,7 +9,6 @@ import matplotlib
 import numpy as np
 
 from itertools import *
-
 from Orange.data.filter import *
 from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.pyplot as plt

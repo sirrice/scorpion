@@ -10,6 +10,7 @@ import numpy as np
 from itertools import chain
 from collections import defaultdict
 from sklearn.cluster import AffinityPropagation, KMeans
+from scorpionsql.errfunc import ErrTypes, compute_bad_inf, compute_bad_score, compute_influence
 
 
 from ..learners.cn2sd.rule import fill_in_rules
@@ -17,7 +18,6 @@ from ..learners.cn2sd.refiner import *
 from ..bottomup.bounding_box import *
 from ..bottomup.cluster import *
 from ..util import *
-from ..errfunc import ErrTypes, compute_bad_inf, compute_bad_score, compute_influence
 
 
 INF = inf = float('inf') # slowly replace inf with INF...

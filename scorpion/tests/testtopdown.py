@@ -14,9 +14,9 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 from sqlalchemy import create_engine
 
-from db import *
-from score import *
-from aggerror import *
+from scorpionsql.db import *
+from scorpionsql.aggerror import *
+
 from arch import *
 from gentestdata import *
 from util import reconcile_tables

@@ -1,9 +1,9 @@
-from ..learners.cn2sd.rule import SDRule
-from ..util import powerset
 from itertools import *
 
+from ..learners.cn2sd.rule import SDRule
+from ..util import powerset
 
-inf = float('inf')
+INF = float('inf')
 
 class Node(object):
     def __init__(self, rule):
@@ -11,9 +11,9 @@ class Node(object):
         self.children = []
         self.parent = None
         self.n = 0
-        self.influence = -inf
+        self.influence = -INF
         self.prev_attr = None
-        self.score = -inf
+        self.score = -INF
 
 
         # boolean set if it was cloned from results of
@@ -36,7 +36,7 @@ class Node(object):
       return node
 
     def set_score(self, score):
-      if self.influence == -inf or self.influence > score:
+      if self.influence == -INF or self.influence > score:
         self.influence = score
         if self.parent:
           self.parent.set_score(score)

@@ -2,7 +2,7 @@ import sys
 sys.path.extend(['.', '..'])
 
 from scorpion.arch import *
-from scorpion.aggerror import ErrTypes
+from scorpionsql.aggerror import ErrTypes
 
 
 class DatasetNames(object):

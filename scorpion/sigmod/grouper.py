@@ -7,6 +7,7 @@ import heapq
 sys.path.extend(['.', '..'])
 
 from itertools import chain
+from scorpionsql.errfunc import *
 
 
 from ..learners.cn2sd.rule import fill_in_rules
@@ -14,7 +15,6 @@ from ..learners.cn2sd.refiner import *
 from ..bottomup.bounding_box import *
 from ..bottomup.cluster import *
 from ..util import *
-from ..errfunc import compute_bad_inf
 
 from basic import Basic
 from merger import Merger

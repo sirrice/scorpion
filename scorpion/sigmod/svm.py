@@ -14,12 +14,12 @@ from rtree.index import Index as RTree
 from rtree.index import Property as RProp
 from Orange.classification import svm
 from sklearn import svm as sksvm
+from scorpionsql.errfunc import ErrTypes
 
 from ..learners.cn2sd.rule import fill_in_rules
 from ..learners.cn2sd.refiner import *
 from ..bottomup.bounding_box import *
 from ..bottomup.cluster import *
-from ..errfunc import ErrTypes
 from ..util import *
 from ..settings import *
 

@@ -3,7 +3,6 @@ import sys
 import random
 import math
 import matplotlib
-import Orange
 import numpy as np
 
 

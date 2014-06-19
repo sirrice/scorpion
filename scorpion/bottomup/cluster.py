@@ -15,7 +15,6 @@ from ..util.prob import *
 from ..util.misc import valid_number
 from ..util.rangeutil import *
 from ..learners.cn2sd.rule import SDRule
-from ..errfunc import compute_bad_inf, compute_bad_score, compute_influence
 
 from bounding_box import *
 

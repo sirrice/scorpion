@@ -19,14 +19,15 @@ from collections import deque, defaultdict
 from dateutil.parser import parse as dateparse
 
 
-from db import *
-from sql import *
+from scorpionsql.db import *
+from scorpionsql.sql import *
+from scorpionsql.sqlparser import *
+from scorpionsql.aggerror import *
+
 from util import *
 from score import *
 from classify import *
-from aggerror import *
 from settings import *
-from sqlparser import *
 
 
 

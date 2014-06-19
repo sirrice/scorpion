@@ -11,8 +11,8 @@ from matplotlib.patches import Rectangle as Rect
 from matplotlib import cm 
 from collections import defaultdict
 
-from scorpion.db import *
-from scorpion.aggerror import *
+from scorpionsql.db import *
+from scorpionsql.aggerror import *
 from scorpion.arch import *
 from scorpion.tests.gentestdata import *
 from scorpion.util import reconcile_tables

@@ -19,8 +19,9 @@ from datetime import datetime
 from multiprocessing import Process, Queue, Pool, Pipe
 from Queue import Empty
 
-from db import *
-from aggerror import *
+from scorpionsql.db import *
+from scorpionsql.aggerror import *
+
 from arch import *
 from util import *
 from sigmod import *

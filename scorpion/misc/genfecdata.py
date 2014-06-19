@@ -1,7 +1,7 @@
 from scorpion.db import connect
 import random
 
-db = engine('fec12')
+db = connect('fec12')
 
 for i in xrange(500):
   amt = 100000 + random.randint(-5000, 5000)
