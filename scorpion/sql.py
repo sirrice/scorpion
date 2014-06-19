@@ -2,10 +2,6 @@ import psycopg2
 from datetime import datetime, date
 
 from db import *
-from util import *
-
-_logger = get_logger()
-
 
 class Query(object):
     def __init__(self, db, select, fr, where,
@@ -161,7 +157,6 @@ class Query(object):
             where.append(clause)
         else:
             where.append( '%s = %%s' % (self.select.nonaggs[0].expr ) )
-        _logger.debug( 'WHERE\t%s', where)
         q = Query(self.db, select, self.fr, where)
         return q
         
@@ -235,35 +230,9 @@ class SelectExpr(object):
     def coalesced_str(self):
         return str(self)
 
-def _get_attrnames():
-    cache = {}
-    def f(db, tables):
-        ret = set()
-        for table in tables:
-            if table in cache:
-                ret.update(cache[table])
-                continue
-            q = '''select column_name from information_schema.columns where table_name = %s
-                   and data_type != 'date' and position('time' in data_type) = 0;'''
-            attrs = [row[0] for row in query(db, q, (table,))]
-            ret.update(attrs)
-            cache[table] = attrs
-        return ret
-    return f
-get_attrnames = _get_attrnames()
-
-
-
-
-
-
-
-
-
-
 
 def quote_sql_str(s):
-    return psycopg2.extensions.QuotedString(s).getquoted()
+  return psycopg2.extensions.QuotedString(s).getquoted()
 
 
 
