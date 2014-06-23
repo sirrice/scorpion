@@ -185,15 +185,18 @@ class SDRule(object) :
       return SDRule(self.data, self.targetClass, conds, self.g, negate=negate)
 
   def clone(self, data=None):
-      if not data:
+      if not data or data == self.data:
         ret = self.cloneAndNegate(self.filter.negate)
+        ret.__examples__ = self.__examples__
       else:
         ret = SDRule(data, self.targetClass, self.filter.conditions[:], self.g, negate=self.filter.negate)
+
       ret.cluster_rules = set(self.cluster_rules)
-      ret.c_range = list(self.c_range)
-      ret.inf_state = list(self.inf_state)
+      if self.c_range is not None:
+        ret.c_range = list(self.c_range)
+      if self.inf_state is not None:
+        ret.inf_state = list(self.inf_state)
       ret.quality = self.quality
-      ret.__examples__ = self.__examples__
       return ret
 
   def cloneWithNewData(self, newdata):
