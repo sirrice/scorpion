@@ -59,6 +59,7 @@ class SharedObj(object):
     self.ignore_attrs = ignore_attrs
     self.merged_tables = {}
     self.rules = {}
+    self.top_k_rules = {}
     self.clauses = {}
     self.c = kwargs.get('c', 0.3)
 

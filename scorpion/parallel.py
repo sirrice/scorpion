@@ -9,7 +9,6 @@ import sys
 import time
 import pdb
 import traceback
-import errfunc
 import numpy as np
 
 from sklearn.cluster import KMeans
@@ -21,6 +20,7 @@ from Queue import Empty
 
 from scorpionsql.db import *
 from scorpionsql.aggerror import *
+import scorpionsql.errfunc as errfunc
 
 from arch import *
 from util import *
@@ -64,7 +64,7 @@ def runner(sharedobj, aggerr, **kwargs):
       return
 
   try:
-    table, rules = serial_hybrid(sharedobj, aggerr, **kwargs)
+    table, rules, top_k_rules = serial_hybrid(sharedobj, aggerr, **kwargs)
   except:
     traceback.print_exc()
     rules = []
@@ -72,6 +72,7 @@ def runner(sharedobj, aggerr, **kwargs):
 
   sharedobj.merged_tables[label] = table
   sharedobj.rules[label] = rules
+  sharedobj.top_k_rules[label] = top_k_rules
   return table, rules
 
 
@@ -202,8 +203,15 @@ def serial_hybrid(obj, aggerr, **kwargs):
     learner.update_status("waiting for merging step to finish")
 
     # wait for results from merger to come back
-    jsons = ch2parq.get()
-    rules = [SDRule.from_json(d, learner.full_table) for d in jsons]
+    json_rules = ch2parq.get()
+    rules = [SDRule.from_json(d, learner.full_table) for d in json_rules]
+
+    top_k_json_rules = ch2parq.get()
+    top_k_json_rules = { 
+      key: pick(g, 1) 
+      for key, g in groupby(top_k_json_rules, key=lambda p: p[0])
+    }
+
     ch2parq.close()
     proc.join()
 
@@ -224,9 +232,11 @@ def serial_hybrid(obj, aggerr, **kwargs):
 
     rules, keyidxs = zip(*allpairs)
     clusters = rules_to_clusters(rules, learner)
+
     pairs = zip(clusters, keyidxs)
     for key, g in groupby(pairs, key=lambda p: p[1]):
-      merger.add_clusters(pick(g, 0), idx=0, partitionkey=key)
+      clusters = pick(g, 0)
+      merger.add_clusters(clusters, idx=0, partitionkey=key)
 
 
     while merger.has_next_task():
@@ -236,9 +246,25 @@ def serial_hybrid(obj, aggerr, **kwargs):
 					group_clusters(merger.best_so_far(), learner)
 				)
     clusters = merger.best_so_far(True)
+
+    c_vals = CheapFrontier.compute_normalized_buckets(25, c_range=learner.c_range)
+    top_k_json_rules = defaultdict(list)
+    for c_val in c_vals:
+      for c in merger.best_at_c(c_val):
+        rule = c.rule.clone()
+        rule.quality = c.inf_func(c_val)
+        top_k_json_rules[c_val].append(rule.to_json())
+    
     merger.close()
 
   costs['rules_get'] = time.time() - start
+
+
+  top_k_rules = defaultdict(list)
+  for c_val, json_rules in top_k_json_rules.iteritems():
+    for d in json_rules:
+      rule = SDRule.from_json(d, data=full_table)
+      top_k_rules[c_val].append(rule)
 
   clusters = list(clusters)
 
@@ -247,21 +273,14 @@ def serial_hybrid(obj, aggerr, **kwargs):
     print "\t", str(c)
 
 
-
   obj.update_status('clustering results')
   start = time.time()
   rules = group_clusters(clusters, learner)
   costs['rules_cluster'] = time.time() - start
   learner.update_rules(aggerr.agg.shortname, rules)
 
-  
-  # return the best rules first in the list
-  start = time.time()
   rules.sort(key=lambda r: r.c_range[0])
   rules = [r.simplify(cdists=learner.cont_dists, ddists=learner.disc_dists) for r in rules]
-  costs['rules_simplify'] = time.time() - start
-
-
 
   print "grouped rules"
   for rule in rules: 
@@ -272,8 +291,9 @@ def serial_hybrid(obj, aggerr, **kwargs):
     print "%.5f\t%s" % (cost, key)
   for key, (cost, count) in learner.stats.iteritems():
     print "%.5f\t%s\t%s" % (cost,key, count)
-  
-  return full_table, rules
+
+  return full_table, rules, top_k_rules
+
 
 
 def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
@@ -344,10 +364,21 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   _logger.debug("merger\texited loop")
 
 
-  merged = merger.best_so_far(True)
+  best = merger.best_so_far(True)
+  best_json_rules = [c.rule.to_json() for c in best]
+
+  c_vals = CheapFrontier.compute_normalized_buckets(25, c_range=learner.c_range)
+  top_k_json_rules = []
+  for c_val in c_vals:
+    for c in merger.best_at_c(c_val):
+      rule = c.rule.clone()
+      rule.quality = c.inf_func(c_val)
+      top_k_json_rules.append((c_val, rule.to_json()))
+
   merger.close()
   _logger.debug("merger\tsending %d results back", len(merged))
-  out_conn.put([c.rule.to_json() for c in merged])
+  out_conn.put(best_json_rules)
+  out_conn.put(top_k_json_rules)
   in_conn.close()
   out_conn.close()
   status.close()

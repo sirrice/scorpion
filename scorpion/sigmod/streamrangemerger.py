@@ -51,6 +51,13 @@ class StreamRangeMerger(RangeMerger2):
 
     self.K = 1
     self.nblocks = 50
+
+    if len(self.learner.full_table) < 40000:
+      self.K = 2
+      self.nblocks = 60
+    if len(self.learner.full_table) < 10000:
+      self.nblocks = 100
+
     self.get_frontier = CheapFrontier(self.c_range, K=self.K, nblocks=self.nblocks)
     self.get_frontier.stats = self.stats
 
@@ -72,6 +79,7 @@ class StreamRangeMerger(RangeMerger2):
   @property
   def frontier_iter(self):
     return list(self.frontiers)
+
 
   @instrument
   def setup_stats(self, clusters):
@@ -125,6 +133,14 @@ class StreamRangeMerger(RangeMerger2):
       self.renderer.plot_active_inf_curves(clusters)
     return clusters
 
+  @instrument
+  def best_at_c(self, c_val, K=6):
+    clusters = set()
+    for frontier in self.frontier_iter:
+      clusters.update(frontier.seen_clusters)
+
+    clusters = sorted(clusters, key=lambda c: c.inf_func(c_val), reverse=True)[:K]
+    return clusters
 
   @instrument
   def add_clusters(self, clusters, idx=0):

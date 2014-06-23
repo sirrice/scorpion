@@ -343,11 +343,15 @@ class CheapFrontier(Frontier):
     """
     Frontier.__init__(self, c_range, min_granularity=min_granularity)
 
+
+    self.seen = set()
+    self.seen_clusters = set()
+
     self.nblocks = nblocks
     #xs = np.arange(nblocks).astype(float) / nblocks
     #self.blocksize = r_vol(c_range) / float(nblocks)
     #self.buckets = (xs * r_vol(c_range)) + c_range[0]
-    self.buckets = self.compute_normalized_buckets(nblocks)
+    self.buckets = CheapFrontier.compute_normalized_buckets(nblocks, self.c_range, self.seen_clusters)
     self.buckets = (self.buckets * r_vol(c_range)) + c_range[0]
     self.nblocks = len(self.buckets)
     self.bests = defaultdict(list)   # bucket -> clusters
@@ -357,27 +361,34 @@ class CheapFrontier(Frontier):
     self.frontier_hashes = []
     self.frontier_infs = []
     self.threshold = np.zeros(self.nblocks).astype(float)
-    self.seen = set()
 
-  def compute_normalized_buckets(self, nblocks):
+  @staticmethod
+  def compute_normalized_buckets(nblocks, c_range=None, clusters=[]):
     """
     return distribution of x buckets, normalized to be between 0 and 1
     """
     if nblocks in CheapFrontier.buckets_cache:
       return CheapFrontier.buckets_cache[nblocks]
+
+    if c_range is None:
+      c_range = [0., 1.]
   
     def mkf(pairs):
       return np.vectorize(lambda c: np.mean([t/pow(b,c) for t,b in pairs]) )
 
     inf_funcs = []
-    while len(inf_funcs) < 200:
-      tops = np.random.rand(5) * 20
-      bots = np.random.rand(5) * 20 + 1.
+    for c in clusters:
+      inf_funcs.append(c.inf_func)
+
+    while len(inf_funcs) < 50:
+      tops = np.random.rand(6) * 20
+      bots = np.random.rand(6) * 20 + 1.
       pairs = zip(tops, bots)
       inf_funcs.append(mkf(pairs))
 
     nblocks = int(nblocks)
     xs = np.arange(nblocks * 2).astype(float) / (nblocks * 2.)
+    xs = xs * r_vol(c_range) + c_range[0]
     all_infs = np.array([inf_func(xs) for inf_func in inf_funcs])
     medians = np.percentile(all_infs, 50, axis=0)
     block = (medians.max() - medians.min()) / nblocks
@@ -393,7 +404,8 @@ class CheapFrontier(Frontier):
     optxs -= optxs.min()
     optxs /= optxs.max()
 
-    CheapFrontier.buckets_cache[nblocks] = optxs
+    if len(clusters) > 30:
+      CheapFrontier.buckets_cache[nblocks] = optxs
     return optxs
 
   @instrument
@@ -525,6 +537,8 @@ class CheapFrontier(Frontier):
 
     for c in clusters:
       self.seen.add(c.bound_hash)
+      if len(self.seen_clusters) < 50:
+        self.seen_clusters.add(c)
     return adds, rms
 
   def __contains__(self, c):
