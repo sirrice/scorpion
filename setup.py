@@ -32,6 +32,7 @@ setup(name="scorpion",
       install_requires = [
         'flask', 'psycopg2', 'sqlalchemy', 
         'Orange', 'numpy', 'scipy', 'scikit-learn',
-        'matplotlib', 'pyparsing', 'rtree'
+        'matplotlib', 'pyparsing', 'rtree',
+        'click'
       ],
       keywords= "")

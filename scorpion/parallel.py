@@ -247,7 +247,8 @@ def serial_hybrid(obj, aggerr, **kwargs):
 				)
     clusters = merger.best_so_far(True)
 
-    c_vals = CheapFrontier.compute_normalized_buckets(25, c_range=learner.c_range)
+    c_vals = CheapFrontier.compute_normalized_buckets(25, clusters)
+    c_vals = c_vals * r_vol(learner.c_range) + learner.c_range[0]
     top_k_json_rules = defaultdict(list)
     for c_val in c_vals:
       for c in merger.best_at_c(c_val):
@@ -367,7 +368,8 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   best = merger.best_so_far(True)
   best_json_rules = [c.rule.to_json() for c in best]
 
-  c_vals = CheapFrontier.compute_normalized_buckets(25, c_range=learner.c_range)
+  c_vals = CheapFrontier.compute_normalized_buckets(25, best)
+  c_vals = c_vals * r_vol(learner.c_range) + learner.c_range[0]
   top_k_json_rules = []
   for c_val in c_vals:
     for c in merger.best_at_c(c_val):

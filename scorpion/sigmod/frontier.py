@@ -348,11 +348,8 @@ class CheapFrontier(Frontier):
     self.seen_clusters = set()
 
     self.nblocks = nblocks
-    #xs = np.arange(nblocks).astype(float) / nblocks
-    #self.blocksize = r_vol(c_range) / float(nblocks)
-    #self.buckets = (xs * r_vol(c_range)) + c_range[0]
-    self.buckets = CheapFrontier.compute_normalized_buckets(nblocks, self.c_range, self.seen_clusters)
-    self.buckets = (self.buckets * r_vol(c_range)) + c_range[0]
+    self.buckets = CheapFrontier.compute_normalized_buckets(nblocks, self.seen_clusters)
+    self.buckets = self.buckets * r_vol(c_range) + c_range[0]
     self.nblocks = len(self.buckets)
     self.bests = defaultdict(list)   # bucket -> clusters
     self.K = K
@@ -363,16 +360,13 @@ class CheapFrontier(Frontier):
     self.threshold = np.zeros(self.nblocks).astype(float)
 
   @staticmethod
-  def compute_normalized_buckets(nblocks, c_range=None, clusters=[]):
+  def compute_normalized_buckets(nblocks, clusters=[]):
     """
     return distribution of x buckets, normalized to be between 0 and 1
     """
     if nblocks in CheapFrontier.buckets_cache:
       return CheapFrontier.buckets_cache[nblocks]
 
-    if c_range is None:
-      c_range = [0., 1.]
-  
     def mkf(pairs):
       return np.vectorize(lambda c: np.mean([t/pow(b,c) for t,b in pairs]) )
 
@@ -388,7 +382,6 @@ class CheapFrontier(Frontier):
 
     nblocks = int(nblocks)
     xs = np.arange(nblocks * 2).astype(float) / (nblocks * 2.)
-    xs = xs * r_vol(c_range) + c_range[0]
     all_infs = np.array([inf_func(xs) for inf_func in inf_funcs])
     medians = np.percentile(all_infs, 50, axis=0)
     block = (medians.max() - medians.min()) / nblocks
