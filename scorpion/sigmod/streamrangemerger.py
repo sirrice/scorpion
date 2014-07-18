@@ -171,12 +171,11 @@ class StreamRangeMerger(RangeMerger2):
     self.tasks[idx] = filter(base_frontier.__contains__, self.tasks[idx])
     self.tasks[idx].extend(clusters)
 
-    if idx == 0:
-      # remove non-frontier-based expansions from future expansion
-      for tidx in self.tasks.keys():
-        if tidx == 0: continue
-        checker = lambda c: not any(map(base_frontier.__contains__, c.ancestors))
-        self.tasks[tidx] = filter(checker, self.tasks[tidx])
+    # remove non-frontier-based expansions from future expansion
+    for tidx in self.tasks.keys():
+      if tidx <= idx: continue
+      checker = lambda c: not any(map(base_frontier.__contains__, c.ancestors))
+      self.tasks[tidx] = filter(checker, self.tasks[tidx])
 
     if clusters:
       _logger.debug("merger:\tadded %d clusters\t%d tasks left", len(clusters), self.ntasks)
@@ -435,15 +434,14 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
     self.tasks[tkey] = filter(frontier.__contains__, self.tasks[tkey])
     self.tasks[tkey].extend(clusters)
 
-    if idx == 0:
-      # remove non-frontier-based expansions from future expansion
-      for (pkey, tidx) in self.tasks.keys():
-        if pkey != partitionkey: continue
-        if tidx == 0: continue
-        checker = lambda c: not any(map(frontier.__contains__, c.ancestors))
-        self.tasks[tkey] = filter(checker, self.tasks[tkey])
+    # remove non-frontier-based expansions from future expansion
+    for (pkey, tidx) in self.tasks.keys():
+      if pkey != partitionkey: continue
+      if tidx <= idx: continue
+      checker = lambda c: not any(map(frontier.__contains__, c.ancestors))
+      self.tasks[tkey] = filter(checker, self.tasks[tkey])
 
-    _logger.debug("merger\t%s\tadding %d of %d clusters\t%d tasks left", partitionkey, len(clusters), nclusters, self.ntasks)
+    _logger.debug("merger\t%s\tadd %d of %d clusters\t%d idx\t%d tasks left", partitionkey, len(clusters), nclusters, idx, self.ntasks)
     return clusters
 
 

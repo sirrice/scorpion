@@ -12,7 +12,7 @@ import traceback
 import numpy as np
 
 from sklearn.cluster import KMeans
-from itertools import chain, groupby
+from itertools import chain
 from collections import defaultdict
 from datetime import datetime
 from multiprocessing import Process, Queue, Pool, Pipe
@@ -168,6 +168,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
 
   learner = klass(**params)
   learner.setup_tables(all_full_table, bad_tables, good_tables)
+  simplify = lambda r: r.simplify(cdists=learner.cont_dists, ddists=learner.disc_dists) 
   parallel = params.get('parallel', False)
   print "executing in parallel?", parallel
 
@@ -215,7 +216,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
     ch2parq.close()
     proc.join()
 
-    clusters = rules_to_clusters(rules, learner)
+    clusters = instrument(rules_to_clusters)(learner, rules, learner)
 
   else:
     mparams = dict(params)
@@ -231,7 +232,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
       allpairs.extend(pairs)
 
     rules, keyidxs = zip(*allpairs)
-    clusters = rules_to_clusters(rules, learner)
+    clusters = instrument(rules_to_clusters)(learner, rules, learner)
 
     pairs = zip(clusters, keyidxs)
     for key, g in groupby(pairs, key=lambda p: p[1]):
@@ -252,7 +253,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
     top_k_json_rules = defaultdict(list)
     for c_val in c_vals:
       for c in merger.best_at_c(c_val):
-        rule = c.rule.clone()
+        rule = simplify(c.rule)
         rule.quality = c.inf_func(c_val)
         top_k_json_rules[c_val].append(rule.to_json())
     
@@ -281,7 +282,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
   learner.update_rules(aggerr.agg.shortname, rules)
 
   rules.sort(key=lambda r: r.c_range[0])
-  rules = [r.simplify(cdists=learner.cont_dists, ddists=learner.disc_dists) for r in rules]
+  rules = map(simplify, rules)
 
   print "grouped rules"
   for rule in rules: 
@@ -300,12 +301,12 @@ def serial_hybrid(obj, aggerr, **kwargs):
 def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   valid_cluster_f = lambda c: True
   status = Status(learner.obj.status.reqid)
+  simplify = lambda r: r.simplify(cdists=learner.cont_dists, ddists=learner.disc_dists) 
 
   def update_status(msg):
     start = time.time()
     merged = list(merger.best_so_far(True))
     rules = group_clusters(merged, learner)
-    simplify = lambda r: r.simplify(cdists=learner.cont_dists, ddists=learner.disc_dists) 
     rules = map(simplify, rules)
     status.update_rules(aggerr.agg.shortname, rules)
     _logger.debug("merger\t%s %d rules\t%.4f sec", msg, len(rules), time.time()-start)
@@ -320,10 +321,11 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   merger = PartitionedStreamRangeMerger(**params)
 
   # setup a merger
-  merged = []
+  seen = set()
   json_pairs = []
   done = False
   while not done or merger.has_next_task():
+    json_pairs = []
     if not done:
       try:
         json_pairs = in_conn.get(False)
@@ -336,14 +338,19 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
       json_pairs = []
 
     try:
-      if json_pairs:
+      if len(json_pairs) > 0:
         pairs = [(SDRule.from_json(d, learner.full_table), keyidx) for d, keyidx in json_pairs]
+        pairs = filter(lambda p: hash(p[0]) not in seen, pairs)
+        seen.update([hash(p[0]) for p in pairs])
         rules, idxkeys = tuple(zip(*pairs))
-        clusters = rules_to_clusters(rules, learner)
+        clusters = instrument(rules_to_clusters)(merger, rules, learner)
         pairs = zip(clusters, idxkeys)
 
+        added = set()
         for key, g in groupby(pairs, key=lambda p: p[1]):
-          added = merger.add_clusters(pick(g, 0), idx=0, partitionkey=key)
+          toadd = pick(g, 0)
+          _logger.debug("merger\tproc calls add_clusters\t%d clusters", len(toadd))
+          added.update(merger.add_clusters(toadd, idx=0, partitionkey=key))
 
         if added:
           update_status("added")
@@ -360,25 +367,26 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
       print e
       import traceback
       traceback.print_exc()
-      merged = []
 
   _logger.debug("merger\texited loop")
 
 
   best = merger.best_so_far(True)
-  best_json_rules = [c.rule.to_json() for c in best]
+  best_json_rules = [
+    c.rule.to_json() 
+    for c in best
+  ]
 
   c_vals = CheapFrontier.compute_normalized_buckets(25, best)
   c_vals = c_vals * r_vol(learner.c_range) + learner.c_range[0]
   top_k_json_rules = []
   for c_val in c_vals:
     for c in merger.best_at_c(c_val):
-      rule = c.rule.clone()
+      rule = simplify(c.rule)
       rule.quality = c.inf_func(c_val)
       top_k_json_rules.append((c_val, rule.to_json()))
 
   merger.close()
-  _logger.debug("merger\tsending %d results back", len(merged))
   out_conn.put(best_json_rules)
   out_conn.put(top_k_json_rules)
   in_conn.close()

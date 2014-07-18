@@ -328,6 +328,8 @@ class SDRule(object) :
       data:   non-filtered! data
       cdists: non-filtered Continuous distribution
       ddists: non-filtered discrete distribution
+    Return:
+      copy of this rule with simplified conditions
     """
     subset = data and self(data) or self.examples
     data = data or self.data
@@ -499,6 +501,7 @@ class SDRule(object) :
       if s:
         ret.append(s)
 
+    ret.sort()
     return ret
   cond_strs = property(toCondStrs)
 

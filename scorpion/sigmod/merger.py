@@ -211,7 +211,11 @@ class Merger(object):
       merged.rule = None
 
       start = time.time()
-      merged.rule = merged.to_rule(self.learner.full_table)
+      merged.rule = merged.to_rule(
+        self.learner.full_table,
+        self.learner.cont_dists,
+        self.learner.disc_dists
+      )
       self.stats['merged.to_rule'][0] += time.time() - start
       self.stats['merged.to_rule'][1] += 1
 
@@ -238,7 +242,11 @@ class Merger(object):
         return None
       merged.rule = None
       start = time.time()
-      merged.rule = merged.to_rule(self.learner.full_table)
+      merged.rule = merged.to_rule(
+        self.learner.full_table,
+        self.learner.cont_dists,
+        self.learner.disc_dists
+      )
       self.stats['merged.to_rule'][0] += time.time() - start
       self.stats['merged.to_rule'][1] += 1
       merged.error = self.influence(merged)

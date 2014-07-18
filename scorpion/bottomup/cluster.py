@@ -7,7 +7,7 @@ import Orange
 import sys
 sys.path.extend(['.', '..'])
 
-from itertools import chain, product, groupby
+from itertools import chain, product
 from collections import defaultdict
 from operator import sub
 

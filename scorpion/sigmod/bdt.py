@@ -266,6 +266,7 @@ class BDT(Basic):
         self.update_status("running partitioners in serial")
         partitioner = BDTTablesPartitioner(**bad_params)
         partitioner.setup_tables(bad_tables, full_table)
+        partitioner.stats = self.stats
         gen = partitioner()
         pairs = [(n.rule, isleaf) for n, isleaf in gen]
         yield pairs
@@ -273,6 +274,7 @@ class BDT(Basic):
 
         partitioner = BDTTablesPartitioner(**good_params)
         partitioner.setup_tables(good_tables, full_table)
+        partitioner.stats = self.stats
         partitioner.update_inf_bound(bound)
         gen = partitioner()
         pairs = [(n.rule, isleaf) for n, isleaf in gen]
@@ -285,8 +287,14 @@ class BDT(Basic):
       bad_c2pq = Queue()
       good_p2cq = Queue()
       good_c2pq = Queue()
-      bad_args = ('bad', bad_params, bad_tables, full_table, (bad_p2cq, bad_c2pq))
-      good_args = ('good', good_params, good_tables, full_table, (good_p2cq, good_c2pq))
+      bad_args = (
+          'bad', bad_params, self, 
+          bad_tables, full_table, self.stats, 
+          (bad_p2cq, bad_c2pq))
+      good_args = (
+          'good', good_params, self,
+          good_tables, full_table, self.stats,
+          (good_p2cq, good_c2pq))
 
       bad_proc = Process(target=partition_f, args=bad_args)
       good_proc = Process(target=partition_f, args=good_args)
@@ -332,7 +340,7 @@ class BDT(Basic):
 
         if pairs:
           dicts = [p[0] for p in pairs]
-          _logger.debug("part\tgot %s\t%s" % (len(pairs), map(hash, map(str, dicts))))
+          #_logger.debug("part\tgot %s\t%s" % (len(pairs), map(hash, map(str, dicts))))
           pairs = [(SDRule.from_json(d, full_table), isleaf) for d, isleaf in pairs]
           yield pairs
 

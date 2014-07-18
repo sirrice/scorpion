@@ -8,6 +8,7 @@ import math
 import matplotlib
 import numpy as np
 
+from collections import defaultdict
 from itertools import *
 from Orange.data.filter import *
 from matplotlib.backends.backend_pdf import PdfPages
@@ -61,17 +62,22 @@ get_logger = GlobalLogger()
 
 
 def instrument(fn):
-    func_name = fn.__name__
-    def w(self, *args, **kwargs):
-        start = time.time()
-        ret = fn(self, *args, **kwargs)
+  func_name = fn.__name__
+  nargs = fn.func_code.co_argcount
+  def w(self, *args, **kwargs):
+    start = time.time()
+    if len(args) == nargs:
+      ret = fn(*args, **kwargs)
+    else:
+      ret = fn(self, *args, **kwargs)
 
-        if func_name not in self.stats:
-            self.stats[func_name] = [0, 0]
-        self.stats[func_name][0] += (time.time() - start)
-        self.stats[func_name][1] += 1
-        return ret
-    return w
+    if hasattr(self, 'stats'):
+      if func_name not in self.stats:
+          self.stats[func_name] = [0, 0]
+      self.stats[func_name][0] += (time.time() - start)
+      self.stats[func_name][1] += 1
+    return ret
+  return w
 
 
 # JSON Encoder
@@ -114,6 +120,12 @@ def rm_dups(seq, key=lambda e:e):
     seen_add = seen.add
     return [ x for x in seq if key(x) not in seen and not seen_add(key(x))]
 
+
+def groupby(iterable, key=lambda: 1):
+  ret = defaultdict(list)
+  for i in iterable:
+    ret[key(i)].append(i)
+  return ret.iteritems()
 
 
 

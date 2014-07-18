@@ -23,14 +23,15 @@ from sampler import Sampler
 from merger import Merger
 from node import Node
 
-inf = 1e10000000
+INF = float('inf')
 _logger = get_logger()
 
 
-def partition_f(name, params, tables, full_table, (inq, outq)):
+def partition_f(name, params, learner, tables, full_table, stats, (inq, outq)):
   try:
     partitioner = BDTTablesPartitioner(**params)
     partitioner.setup_tables(tables, full_table)
+    partitioner.stats = stats
     gen = partitioner()
     start = time.time()
     while not partitioner.is_done:
@@ -45,7 +46,7 @@ def partition_f(name, params, tables, full_table, (inq, outq)):
       for node, isleaf in gen:
         rule = node.rule
         rule.quality = node.influence
-        rule = rule.simplify(full_table)
+        rule = rule.simplify(full_table, learner.cont_dists, learner.disc_dists)
         pairs.append((rule, isleaf))
         if len(pairs) >= 10: break
 
@@ -57,9 +58,9 @@ def partition_f(name, params, tables, full_table, (inq, outq)):
       bound = partitioner.get_inf_bound()
 
       dicts = [(r.to_json(), isleaf) for r, isleaf in pairs]
-      _logger.debug("%s\tsend %d rules\t%s" % (name, len(pairs), map(hash, map(str, dicts))))
+      #_logger.debug("%s\tsend %d rules\t%s" % (name, len(pairs), map(hash, map(str, dicts))))
       outq.put((dicts, bound))
-      _logger.debug("%s\tsent %s!" % (name, len(dicts)))
+      #_logger.debug("%s\tsent %s!" % (name, len(dicts)))
   except Exception as e:
     print e
     import traceback
@@ -121,7 +122,7 @@ class BDTTablesPartitioner(Basic):
         self.samp_rates = [best_sample_size(len(t), self.epsilon)/(float(len(t))+1) for t in self.tables]
 
         if self.inf_bounds is None:
-          self.inf_bounds = [[inf, -inf] for table in tables]
+          self.inf_bounds = [[INF, -INF] for table in tables]
 
         # attributes to partition upon
         self.cont_attrs = [attr.name for attr in merged.domain if attr.name in self.cols and attr.var_type != Orange.feature.Type.Discrete]
@@ -132,7 +133,7 @@ class BDTTablesPartitioner(Basic):
         self.dist_attrs = filter(lambda c: c in self.cols, self.dist_attrs)
 
     def get_inf_bound(self):
-      bound = [inf, -inf]
+      bound = [INF, -INF]
       for inf_bound in self.inf_bounds:
         bound = r_union(bound, inf_bound)
       return bound
@@ -187,9 +188,9 @@ class BDTTablesPartitioner(Basic):
       bools = map(self.should_idx_stop, enumerate(sample_infs))
       perc_passed = np.mean(map(float, bools))
 
-      maxstd, maxrange, minthresh = -inf, -inf, inf
-      maxbound = -inf
-      perc = -inf
+      maxstd, maxrange, minthresh = -INF, -INF, INF
+      maxbound = -INF
+      perc = -INF
       maxidx = -1
       for idx, infs in enumerate(sample_infs):
         if not infs: continue
@@ -201,7 +202,7 @@ class BDTTablesPartitioner(Basic):
           if maxbound:
             perc = (max(infs) - self.inf_bounds[idx][0]) / (maxbound[1]-maxbound[0])
           else:
-            perc = -inf
+            perc = -INF
         maxrange = max(maxrange, max(infs)-min(infs))
         minthresh = min(minthresh, self.compute_threshold(max(infs), idx))
       npts = sum(map(len, datas))
@@ -230,12 +231,12 @@ class BDTTablesPartitioner(Basic):
 
 
     def influence(self, row, idx):
-       if row[self.SCORE_ID].value == -inf:
-            influence = self.err_funcs[idx]((row,))
-            row[self.SCORE_ID] = influence
-            self.inf_bounds[idx][0] = min(influence, self.inf_bounds[idx][0])
-            self.inf_bounds[idx][1] = max(influence, self.inf_bounds[idx][1])
-       return row[self.SCORE_ID].value
+      if row[self.SCORE_ID].value == -INF:
+        influence = self.err_funcs[idx]((row,))
+        row[self.SCORE_ID] = influence
+        self.inf_bounds[idx][0] = min(influence, self.inf_bounds[idx][0])
+        self.inf_bounds[idx][1] = max(influence, self.inf_bounds[idx][1])
+      return row[self.SCORE_ID].value
 
     def compute_threshold(self, infmax, idx):
         infl, infu = tuple(self.inf_bounds[idx])
@@ -245,7 +246,7 @@ class BDTTablesPartitioner(Basic):
         w = tau[0] + s*(infmax - infu)
         w = min(tau[1], w)
         ret = w * (infu - infl)       
-        if ret == -inf:
+        if ret == -INF:
             raise RuntimeError()
         if ret < 0:
           pdb.set_trace()
@@ -259,7 +260,7 @@ class BDTTablesPartitioner(Basic):
       means = map(np.mean, filter(bool, sample_infs))
       if means:
         return np.mean(means)
-      return -inf
+      return -INF
 
 
     @instrument
@@ -297,7 +298,7 @@ class BDTTablesPartitioner(Basic):
         allinfs = rule2infs[r]
         r.quality = self.estimate_inf(allinfs)
 
-      scores = filter(lambda s: s!=-inf, scores)
+      scores = filter(lambda s: s!=-INF, scores)
       return scores
 
     @instrument
@@ -318,12 +319,12 @@ class BDTTablesPartitioner(Basic):
             counts.append(len(infs))
         if scores:
           return np.mean(scores)
-        return -inf
+        return -INF
 
     def merge_scores(self, scores):
         if scores:
           return np.percentile(scores, 75) #10)#75) #XXX: hack
-        return -inf
+        return -INF
 
     def adjust_score(self, score, node, attr, rules):
       # penalize excessive splitting along a single dimension if it is not helping
@@ -339,24 +340,19 @@ class BDTTablesPartitioner(Basic):
 
 
     def get_states(self, tables):#node):
-        #tables = map(node.rule,self.tables)
-
         # find tuples in each table that is closest to the average influence
+        states = []
         all_infs = []
         for idx, table in enumerate(tables):
-            infs = [self.influence(row, idx) for row in table]
-            all_infs.append(infs)
-        states = []
-
-        for idx, t, infs in zip(xrange(len(tables)), tables, all_infs):
-            if infs:
-                avg = np.mean(infs)
-                min_tup = min(t, key=lambda row: self.influence(row, idx))
-                state = self.err_funcs[idx].state((min_tup,))
-                states.append(state)
-            else:
-                states.append(None)
-
+          if len(table) == 0:
+            states.append(None)
+            continue
+          infs = self.compute_infs(idx, table)
+          all_infs.append(infs)
+          min_idx = min(range(len(table)), key=lambda i: infs[i])
+          min_tup = table[min_idx]
+          state = self.err_funcs[idx].state((min_tup,))
+          states.append(state)
         return states
     
 
@@ -453,7 +449,7 @@ class BDTTablesPartitioner(Basic):
         score = self.merge_scores(scores)
         score = self.adjust_score(score, node, attr, new_rules)
         _logger.debug("score:\t%.4f\t%s\t%s", score, attr.name[:6], new_rules[0])
-        if score == -inf: continue
+        if score == -INF: continue
         attr_scores.append((attr, new_rules, score, scores))
 
 
@@ -467,7 +463,7 @@ class BDTTablesPartitioner(Basic):
       attr, new_rules, score, scores = attr_scores[0]
       node.score = min(scores) 
       minscore = curscore - abs(curscore) * self.min_improvement
-      if node.score >= minscore and minscore != -inf:
+      if node.score >= minscore and minscore != -INF:
         _logger.debug("bdt:  \tscore didn't improve\t%.7f >= %.7f", min(scores), minscore)
         yield (node, True)
         return

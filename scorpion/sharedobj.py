@@ -25,8 +25,6 @@ from scorpionsql.sqlparser import *
 from scorpionsql.aggerror import *
 
 from util import *
-from score import *
-from classify import *
 from settings import *
 
 
