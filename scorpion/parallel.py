@@ -414,14 +414,22 @@ def group_clusters(clusters, learner):
   child2parent = get_hierarchies(clusters)
   validf = lambda c: valid_number(c.c_range[0]) and valid_number(c.c_range[1])
 
-  non_children = []
+  ignore = set()
+  non_children = set()
   for c in clusters:
-    if c in child2parent:
+    if c in ignore:
+      continue
+
+    if len(child2parent[c]):
+      for p in child2parent[c]:
+        if contributing(c, p) > 0.6:
+          non_children.add(c)
+          ignore.add(p)
       _logger.debug("groupclust\trm child cluster\t%s", c)
     elif not validf(c):
       _logger.debug("groupclust\tc_range invalid \t%s", c)
     else:
-      non_children.append(c)
+      non_children.add(c)
 
   groups = []
   for key, group in group_by_inf_state(non_children, learner).iteritems():
@@ -433,18 +441,25 @@ def group_clusters(clusters, learner):
   rules = sort_rules(rules, learner)
   return rules
 
+def contributing(child, parent):
+  ratios = []
+  for c, p in zip(child.inf_state[0], parent.inf_state[0]):
+    ratio = (1. + c) / (1. + p)
+    ratios.append(ratio)
+  return np.percentile(ratios, 20) 
+
 def get_hierarchies(clusters):
   """
   Return a child -> parent relationship mapping
   """
   clusters = list(clusters)
-  child2parent = {}
+  child2parent = defaultdict(list)
   for idx, c1 in enumerate(clusters):
     for c2 in clusters[idx+1:]:
-      if c1.contains(c2) and c1.inf_dominates(c2, .01, c_range=c2.c_range):
-        child2parent[c2] = c1
-      elif c2.contains(c1) and c2.inf_dominates(c1, .01, c_range=c1.c_range):
-        child2parent[c1] = c2
+      if c1.contains(c2):
+        child2parent[c2].append(c1)
+      elif c2.contains(c1):
+        child2parent[c1].append(c2)
   return child2parent
 
 def sort_rules(rules, learner):
