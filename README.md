@@ -2,32 +2,16 @@ scorpion
 ========
 
 
-Python Setup
+Install
 
-    pip install 
-      dateutils
-      flask
-      flask-cache
-      flask-compress
-      nltk
-      matplotlib
-      numpy
-      orange
-      psycopg2
-      python-dateutil
-      rtree
-      scipy
-      sqlalchemy
+    pip install scorpion
 
-
-Database Setup
-
-    createdb status
-
-Run for each database/table you want to run scorpion over
+Run the following for each database/table you want to run scorpion over.
+The script replaces NULL values with surrogates and removes nested quotes.
 
     python fixnulls.py <dbname> <tablename>
 
-At this point, the command line programs are not-so-good, 
-so switch over to the summary package, which is a webserver that
-provides a front-end interface.
+
+The command line programs included with this package are immature.
+The `dbwipes` package integrates with scorpion and proves a visual
+front-end interface.

@@ -24,13 +24,8 @@ setup(name="scorpion",
         'tests/unit/sharedobj.py',
         'bin/fixnulls.py',
       ],
-      package_data = {
-        'scorpion': [
-          'jars/*'
-        ]
-      },
       install_requires = [
-        'flask', 'psycopg2', 'sqlalchemy', 
+        'psycopg2', 'sqlalchemy', 
         'Orange', 'numpy', 'scipy', 'scikit-learn',
         'matplotlib', 'pyparsing', 'rtree',
         'click'
