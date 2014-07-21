@@ -19,4 +19,4 @@ front-end interface.
 
     pip install dbwipes
 
-Read the dbwipes README for further instructions
+Read the [dbwipes README](https://github.com/sirrice/dbwipes) for further instructions
