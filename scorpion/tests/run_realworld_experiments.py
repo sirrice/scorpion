@@ -11,43 +11,43 @@ if __name__ == '__main__':
   exit()
 
   # run and gather "ground truth" for everything
-  run(db, 0, pp, klasses=[Naive], max_wait=10*60, c=[0., .25, .5, .75, 1.], granularity=20, naive=True)
-  run(db, 11, pp, klasses=[Naive], max_wait=10*60, c=[0., .25, .5, .75, 1.], granularity=20, naive=True)
-  run(db, 5, pp, klasses=[Naive], max_wait=10*60, c=[0., .25, .5, .75, 1.], granularity=20, naive=True)
-  run(db, 15, pp, klasses=[Naive], max_wait=5*60, c=[0., .25, .5, .75, 1.], granularity=20, naive=True)
+  run(db, 0,  pp, klass=Naive, max_wait=10*60, cs=[0., .25, .5, .75, 1.], granularity=20, naive=True)
+  run(db, 11, pp, klass=Naive, max_wait=10*60, cs=[0., .25, .5, .75, 1.], granularity=20, naive=True)
+  run(db, 5,  pp, klass=Naive, max_wait=10*60, cs=[0., .25, .5, .75, 1.], granularity=20, naive=True)
+  run(db, 15, pp, klass=Naive, max_wait=5*60, cs=[0., .25, .5, .75, 1.], granularity=20, naive=True)
 
 
   # run all others on intel_noon
-  run(db, 0, pp, klasses=[NDT], c=[0., 0.25, 0.5, 0.75, 1.])
-  run(db, 0, pp, klasses= [BDT], l=[0.5], c=[0., 0.25, 0.5, 0.75, 1.], epsilon=[0.0001, 0.001], tau=[0.1, 0.45])
-  run(db, 0, pp, klasses= [BDT], l=[0.5], c=[1.], epsilon=[0.01, 0.1], tau=[0.1, 0.45])
-  run(db, 0, pp, klasses=[MR], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], granularity=20)
+  run(db, 0, pp, klass=[NDT], c=[0., 0.25, 0.5, 0.75, 1.])
+  run(db, 0, pp, klass= [BDT], l=[0.5], c=[0., 0.25, 0.5, 0.75, 1.], epsilon=[0.0001, 0.001], tau=[0.1, 0.45])
+  run(db, 0, pp, klass= [BDT], l=[0.5], c=[1.], epsilon=[0.01, 0.1], tau=[0.1, 0.45])
+  run(db, 0, pp, klass=[MR], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], granularity=20)
 
   # run obama
-  run(db, 11, pp, klasses=[NDT], c=[0., 0.25, 0.5, 0.75, 1.])
-  run(db, 11, pp, klasses=[BDT], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], epsilon=[0.0001, 0.001], tau=[0.1, 0.45])
-  run(db, 11, pp, klasses=[BDT], l=[.5], c=[1.], epsilon=[0.01, 0.1], tau=[0.1, 0.45])
-  run(db, 11, pp, klasses=[MR], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], granularity=20)
+  run(db, 11, pp, klass=[NDT], c=[0., 0.25, 0.5, 0.75, 1.])
+  run(db, 11, pp, klass=[BDT], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], epsilon=[0.0001, 0.001], tau=[0.1, 0.45])
+  run(db, 11, pp, klass=[BDT], l=[.5], c=[1.], epsilon=[0.01, 0.1], tau=[0.1, 0.45])
+  run(db, 11, pp, klass=[MR], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], granularity=20)
 
   # run harddata 1
-  run(db, 5, pp, klasses=[NDT], c=[0., 0.25, 0.5, 0.75, 1.])
-  run(db, 5, pp, klasses=[BDT], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], epsilon=[0.0001, 0.001], tau=[0.1, 0.5])
-  run(db, 5, pp, klasses=[BDT], l=[.5], c=[1.], epsilon=[0.01, 0.1])
-  run(db, 5, pp, klasses=[MR], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], granularity=10)
-  run(db, 5, pp, klasses=[MR], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], granularity=20)
+  run(db, 5, pp, klass=[NDT], c=[0., 0.25, 0.5, 0.75, 1.])
+  run(db, 5, pp, klass=[BDT], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], epsilon=[0.0001, 0.001], tau=[0.1, 0.5])
+  run(db, 5, pp, klass=[BDT], l=[.5], c=[1.], epsilon=[0.01, 0.1])
+  run(db, 5, pp, klass=[MR], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], granularity=10)
+  run(db, 5, pp, klass=[MR], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], granularity=20)
 
   # run harddata 15  -- high dim
-  run(db, 15, pp, klasses=[NDT], c=[0., 0.25, 0.5, 0.75, 1.])
-  run(db, 15, pp, klasses=[BDT], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], epsilon=[0.0001, 0.001])
-  run(db, 15, pp, klasses=[BDT], l=[.5], c=[1.], epsilon=[0.0001, 0.001, 0.01, 0.1])
-  run(db, 15, pp, klasses=[MR], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], granularity=10)
-  run(db, 15, pp, klasses=[MR], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], granularity=20)
+  run(db, 15, pp, klass=[NDT], c=[0., 0.25, 0.5, 0.75, 1.])
+  run(db, 15, pp, klass=[BDT], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], epsilon=[0.0001, 0.001])
+  run(db, 15, pp, klass=[BDT], l=[.5], c=[1.], epsilon=[0.0001, 0.001, 0.01, 0.1])
+  run(db, 15, pp, klass=[MR], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], granularity=10)
+  run(db, 15, pp, klass=[MR], l=[.5], c=[0., 0.25, 0.5, 0.75, 1.], granularity=20)
 
 
-  run(db, 0, pp, klasses=[NaiveMR], max_wait=20*60, c=[0., .25, .5, .75, 1.], granularity=20, naive=True)
-  run(db, 11, pp, klasses=[NaiveMR], max_wait=20*60, c=[0., .25, .5, .75, 1.], granularity=20, naive=True)
-  run(db, 5, pp, klasses=[NaiveMR], max_wait=20*60, c=[0., .25, .5, .75, 1.], granularity=20, naive=True)
-  run(db, 15, pp, klasses=[NaiveMR], max_wait=20*60, c=[0., .25, .5, .75, 1.], granularity=20, naive=True)
+  run(db, 0,  pp, klass=[NaiveMR], max_wait=20*60, c=[0., .25, .5, .75, 1.], granularity=20, naive=True)
+  run(db, 11, pp, klass=[NaiveMR], max_wait=20*60, c=[0., .25, .5, .75, 1.], granularity=20, naive=True)
+  run(db, 5,  pp, klass=[NaiveMR], max_wait=20*60, c=[0., .25, .5, .75, 1.], granularity=20, naive=True)
+  run(db, 15, pp, klass=[NaiveMR], max_wait=20*60, c=[0., .25, .5, .75, 1.], granularity=20, naive=True)
 
 
 

@@ -113,8 +113,9 @@ def warmup(dim, cutoff, **kwargs):
   }
   params.update(kwargs)
 
-  ft, bts, gts, truth, aggerr, cols = get_parameters(dataset, **params)
+  ft, bts, gts, truth, aggerr, cols, obj = get_parameters(dataset, **params)
   params.update({
+    'obj': obj,
     'aggerr' : aggerr,
     'cols' : cols,
     'tablename' : dataset,

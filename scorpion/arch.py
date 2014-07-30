@@ -117,34 +117,6 @@ def get_provenance_split(sharedobj, cols, keys):
 
 
 
-def extract_agg_vals(vals, col_type):
-    fmts = [
-      '%Y-%m-%dT%H:%M:%S.%fZ',
-      '%Y-%m-%dT%H:%M:%S.%f',
-      '%Y-%m-%dT%H:%M:%S',
-      '%Y-%m-%dT%H:%M',
-      '%Y-%m-%dT%H'
-    ]
-    for fmt in fmts:
-      try:
-        ret = [datetime.strptime(val, fmt) for val in vals]
-        print vals
-        if col_type == 'date':
-          ret = [d.date() for d in ret]
-        elif 'Z' in fmt:
-          #ret = [d - timedelta(hours=5) for d in ret] # compensate for 'Z' +4 timezone
-          pass
-        return ret
-      except Exception as e:
-        pass
-
-    try:
-      ret = [datetime.strptime(val, '%Y-%m-%d').date() for val in vals]
-      return ret
-    except Exception as ee:
-      print ee
-      return vals
-
 
 
 

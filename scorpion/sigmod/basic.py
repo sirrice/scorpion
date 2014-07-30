@@ -69,14 +69,14 @@ class Basic(object):
 
   def __hash__(self):
     components = [
-            self.__class__.__name__,
-            str(self.aggerr.__class__.__name__),
-            str(set(self.cols)),
-            self.err_func.__class__.__name__,
-            self.tablename,
-            self.l,
-            self.c
-            ]
+      self.__class__.__name__,
+      str(self.aggerr.__class__.__name__),
+      str(self.cols),
+      self.err_func.__class__.__name__,
+      self.tablename,
+      self.l,
+      self.c
+    ]
     components = map(str, components)
     return hash('\n'.join(components))
 
@@ -218,7 +218,7 @@ class Basic(object):
   @instrument
   def influence(self, rule, c=None):
     inf_state = self.influence_state(rule)
-    quality = self.influence_from_state(*inf_state, nclauses=len(rule.filter.conditions))
+    quality = self.influence_from_state(*inf_state, c=c, nclauses=len(rule.filter.conditions))
     rule.quality = quality
     rule.inf_state = inf_state
     return quality

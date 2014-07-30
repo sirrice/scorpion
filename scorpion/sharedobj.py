@@ -24,8 +24,9 @@ from scorpionsql.sql import *
 from scorpionsql.sqlparser import *
 from scorpionsql.aggerror import *
 
-from util import *
-from settings import *
+from scorpion.arch import *
+from scorpion.util import *
+from scorpion.settings import *
 
 
 
@@ -155,8 +156,11 @@ def create_sharedobj(dbname, sql, badresults, goodresults, errtype):
 
   qobj = obj.parsed
   nonagg = qobj.select.nonaggs[0]
-  xcol = nonagg.cols[0]
-  col_type = db_type(db, qobj.fr, xcol)
+  try:
+    xcol = nonagg.cols[0]
+    col_type = db_type(db, qobj.fr, xcol)
+  except:
+    col_type = None
 
   # assumes every aggregate has the same bad keys
   badresults = extract_agg_vals(badresults, col_type)
@@ -174,5 +178,33 @@ def create_sharedobj(dbname, sql, badresults, goodresults, errtype):
   table = get_provenance(obj, obj.errors[0].agg.cols, obj.errors[0].keys)
   return obj, table
 
+
+def extract_agg_vals(vals, col_type=None):
+  fmts = [
+    '%Y-%m-%dT%H:%M:%S.%fZ',
+    '%Y-%m-%dT%H:%M:%S.%f',
+    '%Y-%m-%dT%H:%M:%S',
+    '%Y-%m-%dT%H:%M',
+    '%Y-%m-%dT%H'
+  ]
+  for fmt in fmts:
+    try:
+      ret = [datetime.strptime(val, fmt) for val in vals]
+      print vals
+      if col_type == 'date':
+        ret = [d.date() for d in ret]
+      elif 'Z' in fmt:
+        #ret = [d - timedelta(hours=5) for d in ret] # compensate for 'Z' +4 timezone
+        pass
+      return ret
+    except Exception as e:
+      pass
+
+  try:
+    ret = [datetime.strptime(val, '%Y-%m-%d').date() for val in vals]
+    return ret
+  except Exception as ee:
+    print ee
+    return vals
 
 

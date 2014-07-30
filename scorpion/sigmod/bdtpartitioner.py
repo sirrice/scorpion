@@ -43,9 +43,9 @@ def partition_f(name, params, learner, tables, full_table, stats, (inq, outq)):
         elif cmd == 'leaf':
           dicts = payload
           rules = [SDRule.from_json(d, full_table) for d in dicts]
-          nodes = [Node(rule, None) for rule in rules]
+          nodes = [Node(rule) for rule in rules]
           for node in nodes:
-            partitioner.add_child(node)
+            partitioner.add_root(node)
 
       except Empty:
         pass
@@ -168,7 +168,7 @@ class BDTTablesPartitioner(Basic):
     self.is_done = True
 
   def add_root(self, node):
-    self.roots.extend(node.leaves())
+    self.roots.extend(node.leaves)
 
   def get_inf_bound(self):
     bound = [INF, -INF]

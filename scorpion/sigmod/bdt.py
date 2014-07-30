@@ -57,7 +57,7 @@ class BDT(Basic):
     components = [
       self.__class__.__name__,
       str(self.aggerr.__class__.__name__),
-      str(set(self.cols)),
+      str(self.cols),
       self.epsilon,
       self.tau,
       self.p,

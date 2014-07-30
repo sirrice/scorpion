@@ -111,22 +111,44 @@ class Cluster(object):
       cur = cur.parents[0]
     return cur
 
-  def __volume__(self):
-      return volume(self.bbox)
-  volume = property(__volume__)
+  @property
+  def volume(self):
+    return volume(self.bbox)
+
+  @property
+  def bound_hash(self):
+    if self._bound_hash is None:
+      discretes = []
+      for dkey in sorted(self.discretes.keys()):
+        discretes.append(dkey)
+        discretes.append(":::")
+        discretes.extend(map(hash, sorted(self.discretes[dkey]))) 
+      self._bound_hash = hash((self.bbox, str(discretes)))
+    return self._bound_hash
+
+  @property
+  def ancestors(self):
+    if not self.parents:
+      return (self,)
+    ret = []
+    for p in self.parents:
+      ret.extend(p.ancestors)
+    return ret
+
+
 
   def clone(self, copy_rule=False):
-      c = Cluster(
-        self.bbox, self.error, self.cols,
-        parents=self.parents, discretes=self.discretes, 
-        **self.kwargs
-      )
-      c.inf_func = self.inf_func
-      c.inf_state = list(self.inf_state)
-      c.c_range = list(self.c_range)
-      if copy_rule:
-        c.rule = self.rule
-      return c
+    c = Cluster(
+      self.bbox, self.error, self.cols,
+      parents=self.parents, discretes=self.discretes, 
+      **self.kwargs
+    )
+    c.inf_func = self.inf_func
+    c.inf_state = list(self.inf_state)
+    c.c_range = list(self.c_range)
+    if copy_rule:
+      c.rule = self.rule
+    return c
 
 
   def split_on(self, c):
@@ -340,56 +362,54 @@ class Cluster(object):
 
 
   def discretes_contains(self, o):
-      for key in o.discretes.keys():
-          if key in self.discretes:
-              diff = set(o.discretes[key]).difference(self.discretes[key])
-              if len(diff):
-                  return False
-      return True
+    for key in o.discretes.keys():
+        if key in self.discretes:
+            diff = set(o.discretes[key]).difference(self.discretes[key])
+            if len(diff):
+                return False
+    return True
 
   def discretes_same(self, o):
-      mykeys = set(self.discretes.keys())
-      okeys = set(o.discretes.keys())
-      if mykeys != okeys:
-          return False
-      for key in mykeys:
-          if set(self.discretes[key]) != set(o.discretes[key]):
-              return False
-      return True
+    mykeys = set(self.discretes.keys())
+    okeys = set(o.discretes.keys())
+    if mykeys != okeys:
+        return False
+    for key in mykeys:
+        if set(self.discretes[key]) != set(o.discretes[key]):
+            return False
+    return True
 
   def discretes_overlap(self, o):
-      myd = self.discretes
-      od = o.discretes
-      keys = set(myd.keys()).intersection(set(od.keys()))
-      
-      for key in keys:
-          if len(od[key].intersection(myd[key])) == 0:
-              return False
-      return True
+    myd = self.discretes
+    od = o.discretes
+    keys = set(myd.keys()).intersection(set(od.keys()))
+    
+    for key in keys:
+        if len(od[key].intersection(myd[key])) == 0:
+            return False
+    return True
 
   def discretes_intersect(self, o):
-      myd = self.discretes
-      od = o.discretes
-      keys = set(myd.keys()).intersection(set(od.keys()))
-      
-      for key in keys:
-          if len(od[key].intersection(myd[key])) < min(len(od[key]), len(myd[key])):
-              return False
-      return True
+    myd = self.discretes
+    od = o.discretes
+    keys = set(myd.keys()).intersection(set(od.keys()))
+    
+    for key in keys:
+        if len(od[key].intersection(myd[key])) < min(len(od[key]), len(myd[key])):
+            return False
+    return True
 
   def discretes_distance(self, o):
-      myd = self.discretes
-      od = o.discretes
-      keys = set(myd.keys()).union(set(od.keys()))
-      
-      diff = 0
-      for key in keys:
-          mvals = myd.get(key, set())
-          ovals = od.get(key, set())
-          diff += len(mvals) + len(ovals) - len(mvals.intersection(ovals))
-      return diff
-
-
+    myd = self.discretes
+    od = o.discretes
+    keys = set(myd.keys()).union(set(od.keys()))
+    
+    diff = 0
+    for key in keys:
+        mvals = myd.get(key, set())
+        ovals = od.get(key, set())
+        diff += len(mvals) + len(ovals) - len(mvals.intersection(ovals))
+    return diff
 
   def to_rule(self, table, cont_dists=None, disc_dists=None):
     """
@@ -457,45 +477,15 @@ class Cluster(object):
       newdiscretes = dict(filter(lambda (k,v): k in cols, self.discretes.iteritems()))
       return Cluster(newbbox, self.error, newcols, parents=self.parents, discretes=newdiscretes)
 
-
-
-  def __ancestors__(self):
-      if not self.parents:
-          return (self,)
-      ret = []
-      for p in self.parents:
-          ret.extend(p.ancestors)
-      return ret
-  ancestors = property(__ancestors__)
   
   def __str__(self):
       cr = "%.4f-%.4f" % tuple(self.c_range)
       return '%.4f\t%s\t%s' % (self.error, cr, str(self.rule))
-      s = '\t'.join(['%s:(%.4f, %.4f)' % (col, bound[0], bound[1]) 
-                  for col, bound in zip(self.cols, zip(*self.bbox))])
-      d = '\t'.join(["%s:%s (%d els)" % (k, str(list(v)[:3]), len(v)) 
-        for k,v in self.discretes.iteritems()])
-      return '%.4f\t%s\t%s\t%s' % (self.error, cr, s, d)
-      fmt = '\t'.join(['%.4f'] * len(self.bbox[0]))
-      args = (self.error, fmt % self.bbox[0], fmt % self.bbox[1], str(self.discretes))
-      return '%.6f\t%s\t%s\t%s' % args
 
   def __hash__(self):
     if self.hash is None:
       self.hash = self.bound_hash
     return self.hash
-
-
-  @property
-  def bound_hash(self):
-    if self._bound_hash is None:
-      discretes = []
-      for dkey in sorted(self.discretes.keys()):
-        discretes.append(dkey)
-        discretes.append(":::")
-        discretes.extend(map(hash, sorted(self.discretes[dkey]))) 
-      self._bound_hash = hash((self.bbox, str(discretes)))
-    return self._bound_hash
 
   def __eq__(self, o):
       return hash(self) == hash(o)
@@ -506,62 +496,55 @@ def filter_bad_clusters(clusters):
   return filter(f, clusters)
 
 def compute_clusters_threshold(clusters, nstds=1.):
-    if not clusters:
-        return 0.
-    errors = [c.error for c in filter_bad_clusters(clusters)]
-    return np.percentile(errors, 70)
-    npts = [c.npts for c in clusters]
-    #npts = [1] * len(clusters)
-    mean, std = wmean(errors, npts), wstd(errors, npts)        
-    thresh = max(0, min(max(errors), mean + nstds * std))
-    thresh = min(max(errors), mean + nstds * std)
-    return thresh
+  if not clusters:
+      return 0.
+  errors = [c.error for c in filter_bad_clusters(clusters)]
+  return np.percentile(errors, 70)
+  npts = [c.npts for c in clusters]
+  #npts = [1] * len(clusters)
+  mean, std = wmean(errors, npts), wstd(errors, npts)        
+  thresh = max(0, min(max(errors), mean + nstds * std))
+  thresh = min(max(errors), mean + nstds * std)
+  return thresh
 
 
 def filter_top_clusters(clusters, nstds=1.):
-    """
-    compute mean and std of error of clusters.  return clusters
-    nstds above mean
-    """
-    if len(clusters) <= 1:
-        return clusters
-    thresh = compute_clusters_threshold(clusters, nstds)
-    f = lambda c: c.error >= thresh
-    return filter(f, clusters)
+  """
+  compute mean and std of error of clusters.  return clusters
+  nstds above mean
+  """
+  if len(clusters) <= 1:
+      return clusters
+  thresh = compute_clusters_threshold(clusters, nstds)
+  f = lambda c: c.error >= thresh
+  return filter(f, clusters)
 
-    errors = [c.error for c in clusters]
-    minv, maxv, mean, std = min(errors), max(errors), np.mean(errors), np.std(errors)
-    thresh = min(maxv, mean + nstds * std)
-    thresh = 0.6 * (maxv - minv) + minv
-    f = lambda c: c.error >= thresh
-    return filter(f, clusters)
+  errors = [c.error for c in clusters]
+  minv, maxv, mean, std = min(errors), max(errors), np.mean(errors), np.std(errors)
+  thresh = min(maxv, mean + nstds * std)
+  thresh = 0.6 * (maxv - minv) + minv
+  f = lambda c: c.error >= thresh
+  return filter(f, clusters)
 
 
 def normalize_cluster_errors(clusters):
-    if not clusters:
-        return clusters
-    errors = np.array([c.error for c in clusters])
-    mean, std = np.mean(errors), np.std(errors)
-    if std == 0: std = 1
-    for c in clusters:
-      c.error = (c.error - mean) / std
+  if not clusters:
     return clusters
-    mine, maxe = min(errors), max(errors)
-    div = 1. if maxe == mine else (maxe-mine)
-
-    for c in clusters:
-        c.error = (c.error - mine) / div
-    return clusters
-
+  errors = np.array([c.error for c in clusters])
+  mean, std = np.mean(errors), np.std(errors)
+  if std == 0: std = 1
+  for c in clusters:
+    c.error = (c.error - mean) / std
+  return clusters
 
 def clusters_to_rules(clusters, table):
-    import Orange
-    attrnames = [attr.name for attr in table.domain]
-    cont_dists = dict(zip(attrnames, Orange.statistics.basic.Domain(table)))
-    disc_dists = dict(zip(attrnames, Orange.statistics.distribution.Domain(table)))
-    args = {'cont_dists' : cont_dists,
-            'disc_dists' : disc_dists}
+  import Orange
+  attrnames = [attr.name for attr in table.domain]
+  cont_dists = dict(zip(attrnames, Orange.statistics.basic.Domain(table)))
+  disc_dists = dict(zip(attrnames, Orange.statistics.distribution.Domain(table)))
+  args = {'cont_dists' : cont_dists,
+          'disc_dists' : disc_dists}
 
-    rules = [c.to_rule(table, **args) for c in clusters]
+  rules = [c.to_rule(table, **args) for c in clusters]
 
-    return rules
+  return rules

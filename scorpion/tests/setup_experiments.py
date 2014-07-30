@@ -15,38 +15,44 @@ random.seed(0)
 def init_db(db):
   try:
     with db.begin() as conn:
-        conn.execute("""create table stats (
-    expid int,
-    id serial,
-    tstamp timestamp default current_timestamp,
-    dataset text,
-    klass varchar(128) null,
-    cols text null,
-    epsilon float null,
-    c float null,
-    lambda float null,
-    cost float,
-    acc float,
-    prec float,
-    recall float,
-    f1 float,
-    score float,
-    isbest bool,
-    ischeckpoint bool default FALSE,
-    checkpoint float null,
-    completed bool,
-    rule text null,
-    ids text null,
-    notes text null,
-    boundtype text null
-            )""")
-        conn.execute("""create table costs (
+      conn.execute("""create table results (
+        expid int,
+        id serial,
+        tstamp timestamp default current_timestamp,
+        dataset text,
+        klass varchar(128) null,
+        cols text null,
+        epsilon float null,
+        c float null,
+        lambda float null,
+        cost float,
+        score float,
+        isbest bool,
+        ischeckpoint bool default FALSE,
+        checkpoint float null,
+        completed bool,
+        rule text null,
+        ids text null,
+        notes text null,
+        boundtype text null
+          )""")
+      conn.execute("""create table stats (
+        expid int,
+        resultid int,
+        tstamp timestamp default current_timestamp,
+        id serial,
+        prec float,
+        recall float,
+        f1 float,
+        notes text null
+      )""")
+      conn.execute("""create table costs (
         id serial,
         sid int,
         name varchar(128),
         cost float)""")
-  except:
-      pass
+  except Exception as e:
+    print e
 
   try:
     with db.begin() as conn:
@@ -68,7 +74,7 @@ def init_db(db):
 
 
 def setup_synth_metadata(tablename, params, oboxes, sboxes):
-  from scorpion.db import connect
+  from scorpionsql.db import connect
   eng = connect('sigmod')
   db = eng.connect()
   val = json.dumps({
@@ -91,16 +97,16 @@ def setup_synth_data(tablename, schema, pts):
           print >>f, '\t'.join(['%.4f']*len(pt)) % tuple(pt)
   os.system('importmydata.py %s sigmod /tmp/clusters.txt 2> /tmp/dbtruck.err > /tmp/dbtruck.log' % tablename)
 
-def setup_sigmod(ndim, volperc):
+def setup_sigmod(ndim, uo, volperc):
   params = []
   #for kdim in xrange(1, ndim+1):
   kdim = ndim
   npts = 2000
-  for uo in (30, 80):
-    tablename = 'data_%d_%d_%d_0d%d_%duo'
-    args = (ndim, kdim, npts, int(100.*volperc), uo)
-    tablename = tablename % args
-    params.append((tablename, (npts, ndim, kdim, volperc, 10, 10, uo, 10)))
+
+  tablename = 'data_%d_%d_%d_0d%d_%duo'
+  args = (ndim, kdim, npts, int(100.*volperc), uo)
+  tablename = tablename % args
+  params.append((tablename, (npts, ndim, kdim, volperc, 10, 10, uo, 10)))
 
 
   for tablename, args in params:
@@ -108,16 +114,15 @@ def setup_sigmod(ndim, volperc):
     setup_synth_data(tablename, schema, pts)
     setup_synth_metadata(tablename, args, [obox], [sbox])
 
-def setup_multicluster(ndim, volperc):
+def setup_multicluster(ndim, uo, volperc):
   print >>sys.stderr, "loading multi-cluster outliers"
 
   npts = 2000
   params = []
-  for uo in (30, 80):
-    tablename = 'data2clust_%d_%d_%d_vol%d_uo%d' 
-    args = (ndim, ndim, npts, int(100*volperc), uo)
-    tablename = tablename % args
-    params.append((tablename, (2000, ndim, ndim, volperc, 10, 10, uo, 10)))
+  tablename = 'data2clust_%d_%d_%d_vol%d_uo%d' 
+  args = (ndim, ndim, npts, int(100*volperc), uo)
+  tablename = tablename % args
+  params.append((tablename, (2000, ndim, ndim, volperc, 10, 10, uo, 10)))
  
   for tablename, args in params:
     oboxes, sboxes, schema, pts = gen_multi_outliers(*args)
@@ -129,28 +134,29 @@ if __name__ == '__main__':
   db = create_engine('postgresql://localhost/sigmod')
   init_db(db) 
 
+  for uo in (100,):
+    setup_sigmod(2, uo, 0.5)
+    setup_sigmod(3, uo, 0.5)
+    setup_sigmod(4, uo, 0.5)
+    setup_sigmod(5, uo, 0.5)
+
+    setup_sigmod(2, uo, 0.01)
+    setup_sigmod(3, uo, 0.01)
+    setup_sigmod(4, uo, 0.01)
+    setup_sigmod(5, uo, 0.01)
+    setup_sigmod(2, uo, 0.1)
+    setup_sigmod(3, uo, 0.1)
+    setup_sigmod(4, uo, 0.1)
+    setup_sigmod(5, uo, 0.1)
+    continue
 
 
-
-  setup_sigmod(2, 0.5)
-  setup_sigmod(3, 0.5)
-  setup_sigmod(4, 0.5)
-  setup_sigmod(5, 0.5)
-  setup_multicluster(2, .15)
-  setup_multicluster(3, .15)
-  setup_multicluster(2, .2)
-  setup_multicluster(3, .2)
-  setup_multicluster(4, .15)
-  setup_multicluster(4, .2)
-  setup_sigmod(2, 0.01)
-  setup_sigmod(3, 0.01)
-  setup_sigmod(4, 0.01)
-  setup_sigmod(5, 0.01)
-  setup_sigmod(2, 0.1)
-  setup_sigmod(3, 0.1)
-  setup_sigmod(4, 0.1)
-  setup_sigmod(5, 0.1)
-
+    setup_multicluster(2, uo, .15)
+    setup_multicluster(3, uo, .15)
+    setup_multicluster(2, uo, .2)
+    setup_multicluster(3, uo, .2)
+    setup_multicluster(4, uo, .15)
+    setup_multicluster(4, uo, .2)
 
 
   db.dispose()

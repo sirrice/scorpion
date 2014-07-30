@@ -36,7 +36,8 @@ class StreamRangeMerger(RangeMerger2):
 
     # all values for each dimension
     self.all_cont_vals = defaultdict(set) # idx -> values
-    # name -> { val -> [sum, count] }
+
+    # attribute name -> { attr val -> [sum of influence value at c=0.1, count] }
     self.all_disc_vals = defaultdict(lambda: defaultdict(lambda: [0,0])) 
 
     # name -> { val -> # times failed }
@@ -49,7 +50,7 @@ class StreamRangeMerger(RangeMerger2):
     self.adj_graph = None
 
 
-    self.K = 1
+    self.K = 2
     self.nblocks = 50
 
     if len(self.learner.full_table) < 40000:
@@ -138,6 +139,7 @@ class StreamRangeMerger(RangeMerger2):
     clusters = set()
     for frontier in self.frontier_iter:
       clusters.update(frontier.seen_clusters)
+    rm_dups(clusters, key=lambda c: str(c.rule))
 
     clusters = sorted(clusters, key=lambda c: c.inf_func(c_val), reverse=True)[:K]
     return clusters
@@ -379,6 +381,13 @@ class StreamRangeMerger(RangeMerger2):
 
 
 class PartitionedStreamRangeMerger(StreamRangeMerger):
+  """
+  Partitions the merger based on user defined labels so that frontier curves from 
+  one partition do not suppress curves in another partition
+
+  MR labels based on dimensionality
+  BDT labels as leaf/non-leaf
+  """
 
   def __init__(self, *args, **kwargs):
     super(PartitionedStreamRangeMerger, self).__init__(*args, **kwargs)
@@ -421,6 +430,13 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
     frontier = self.get_frontier_obj(idx, partitionkey)
     if not skip_frontier:
       clusters, _ = frontier.update(clusters)
+
+    # XXX: new cluster should be better than _all_ frontiers
+    #for f in self.frontier_iter:
+    #clusters, _ = f.update(clusters)
+
+    if not clusters: 
+      return clusters
 
     if self.DEBUG and not skip_frontier:
       print "base_frontier"

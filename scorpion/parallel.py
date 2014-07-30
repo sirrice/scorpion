@@ -64,7 +64,7 @@ def runner(sharedobj, aggerr, **kwargs):
       return
 
   try:
-    table, rules, top_k_rules = serial_hybrid(sharedobj, aggerr, **kwargs)
+    learner, table, rules, top_k_rules = serial_hybrid(sharedobj, aggerr, **kwargs)
   except:
     traceback.print_exc()
     rules = []
@@ -152,6 +152,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
 
   params = dict(DEFAULT_PARAMS)
   params.update({
+    'cols': cols,
     'obj': obj,
     'aggerr':aggerr,
     'cols':cols,
@@ -159,12 +160,14 @@ def serial_hybrid(obj, aggerr, **kwargs):
   })
   params.update(dict(kwargs))
 
-  if aggerr.agg.func.__class__ in (errfunc.SumErrFunc, errfunc.CountErrFunc):
-    klass = MR 
-  else:
-    klass = BDT
-  if False:
-    klass = SVM
+  klass = params.get('klass', None)
+  if klass is None:
+    if aggerr.agg.func.__class__ in (errfunc.SumErrFunc, errfunc.CountErrFunc):
+      klass = MR 
+    else:
+      klass = BDT
+    if False:
+      klass = SVM
 
   learner = klass(**params)
   learner.setup_tables(all_full_table, bad_tables, good_tables)
@@ -174,7 +177,29 @@ def serial_hybrid(obj, aggerr, **kwargs):
 
   start = time.time()
 
-  if parallel:
+  if klass in [Naive]:
+    allpairs = []
+    for pairs in learner(all_full_table, bad_tables, good_tables):
+      allpairs.extend(pairs)
+
+    rules, keyidxs = zip(*allpairs)
+    clusters = instrument(rules_to_clusters)(learner, rules, learner)
+
+    if 'cs' in params:
+      c_vals = params['cs']
+    elif 'c' in params:
+      c_vals = [params['c']]
+    else:
+      c_vals = []
+    top_k_json_rules = defaultdict(list)
+    for c_val in c_vals:
+      for c in learner.bests_per_c[c_val]:
+        rule = simplify(c.rule)
+        rule.quality = c.inf_func(c_val)
+        top_k_json_rules[c_val].append(rule.to_json())
+ 
+
+  elif parallel:
     clusters = []
     par2chq = Queue()
     ch2parq = Queue()
@@ -248,8 +273,11 @@ def serial_hybrid(obj, aggerr, **kwargs):
 				)
     clusters = merger.best_so_far(True)
 
-    c_vals = CheapFrontier.compute_normalized_buckets(25, clusters)
-    c_vals = c_vals * r_vol(learner.c_range) + learner.c_range[0]
+    if 'cs' in params:
+      c_vals = params['cs']
+    else:
+      c_vals = CheapFrontier.compute_normalized_buckets(25, clusters)
+      c_vals = c_vals * r_vol(learner.c_range) + learner.c_range[0]
     top_k_json_rules = defaultdict(list)
     for c_val in c_vals:
       for c in merger.best_at_c(c_val):
@@ -260,6 +288,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
     merger.close()
 
   costs['rules_get'] = time.time() - start
+  learner.stats['cost_total'] = (time.time() - start, 1)
 
 
   top_k_rules = defaultdict(list)
@@ -283,6 +312,12 @@ def serial_hybrid(obj, aggerr, **kwargs):
 
   rules.sort(key=lambda r: r.c_range[0])
   rules = map(simplify, rules)
+  for r in rules:
+    r.rule = r
+    r.inf_func = learner.create_inf_func(r)
+    del r.rule
+
+
 
   print "grouped rules"
   for rule in rules: 
@@ -294,16 +329,20 @@ def serial_hybrid(obj, aggerr, **kwargs):
   for key, (cost, count) in learner.stats.iteritems():
     print "%.5f\t%s\t%s" % (cost,key, count)
 
-  return full_table, rules, top_k_rules
+  return learner, full_table, rules, top_k_rules
 
 
 
 def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   valid_cluster_f = lambda c: True
-  status = Status(learner.obj.status.reqid)
   simplify = lambda r: r.simplify(cdists=learner.cont_dists, ddists=learner.disc_dists) 
+  try:
+    status = Status(learner.obj.status.reqid)
+  except:
+    status = None
 
   def update_status(msg):
+    if status is None: return
     start = time.time()
     merged = list(merger.best_so_far(True))
     rules = group_clusters(merged, learner)
@@ -338,9 +377,12 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
       json_pairs = []
 
     try:
+      pairs = []
       if len(json_pairs) > 0:
         pairs = [(SDRule.from_json(d, learner.full_table), keyidx) for d, keyidx in json_pairs]
         pairs = filter(lambda p: hash(p[0]) not in seen, pairs)
+
+      if len(pairs) > 0:
         seen.update([hash(p[0]) for p in pairs])
         rules, idxkeys = tuple(zip(*pairs))
         clusters = instrument(rules_to_clusters)(merger, rules, learner)
@@ -377,8 +419,12 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
     for c in best
   ]
 
-  c_vals = CheapFrontier.compute_normalized_buckets(25, best)
-  c_vals = c_vals * r_vol(learner.c_range) + learner.c_range[0]
+  if 'cs' in params:
+    c_vals = params['cs']
+  else:
+    c_vals = CheapFrontier.compute_normalized_buckets(25, best)
+    c_vals = c_vals * r_vol(learner.c_range) + learner.c_range[0]
+
   top_k_json_rules = []
   for c_val in c_vals:
     for c in merger.best_at_c(c_val):
@@ -391,7 +437,8 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
   out_conn.put(top_k_json_rules)
   in_conn.close()
   out_conn.close()
-  status.close()
+  if status is not None:
+    status.close()
 
   for key, (cost, count) in merger.stats.iteritems():
     print "%.5f\t%s\t%s" % (cost, key, count)

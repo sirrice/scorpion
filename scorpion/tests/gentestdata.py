@@ -6,34 +6,35 @@ from scorpionsql.aggerror import ErrTypes
 
 
 class DatasetNames(object):
-    def __init__(self):
-         self.datasetnames = ['intel_noon',
-                'intel_corr',
-                'intel_mote18',
-                'intel_first_spike',
-                'intel_mass_failures',
-                'intel_low_voltage',
-                'harddata1_avg',
-                'harddata1_std',
-                'harddata1_sum',
-                'harddata1_skewed',
-                'harddata2_avg',
-                'harddata3_avg',                
-                'fec12_obama',
-                'intel_foo',
-                'fec12_donation',
-                'fec12_donation2',
-                'harddata4_sum',
-                'data_2_2_1000_0d25',
-                'data_2_2_1000_0d1',
-                'lqm' # 19
-                ]
+  def __init__(self):
+    self.datasetnames = [
+      'intel_noon',
+      'intel_corr',
+      'intel_mote18',
+      'intel_first_spike',
+      'intel_mass_failures',
+      'intel_low_voltage',
+      'harddata1_avg',
+      'harddata1_std',
+      'harddata1_sum',
+      'harddata1_skewed',
+      'harddata2_avg',
+      'harddata3_avg',                
+      'fec12_obama',
+      'intel_foo',
+      'fec12_donation',
+      'fec12_donation2',
+      'harddata4_sum',
+      'data_2_2_1000_0d25',
+      'data_2_2_1000_0d1',
+      'lqm' # 19
+    ]
 
-    def __getitem__(self, key):
-        try:
-            return self.datasetnames[int(key)]
-        except:
-            return key
+  def __getitem__(self, key):
+    try:
+      return self.datasetnames[int(key)]
+    except:
+      return key
 datasetnames = DatasetNames()
 
 # sigmod_<ndim>_<kdim>_<npts/group>_<volume>[_uh_sh_uo_so]
@@ -340,7 +341,7 @@ def get_sigmod_data(fname):
     """
     fname: data_<ndim>_<kdim>_<npts/group>_<volume>[_uh_sh_uo_so]
     """
-    sql = """SELECT avg(v), g FROM %s GROUP BY g""" % fname
+    sql = """SELECT sum(v), g FROM %s GROUP BY g""" % fname
     badresults = range(5,10)
     goodresults = range(5)
 
