@@ -1,7 +1,7 @@
 #
-# numerous helper methods for comparing influence dominance
-# between predicates across a range of c (lambda in job talk)
-# values
+# The Frontier classes are designed to take a set of clusters
+# can compute the spans of c values that each cluster is in
+# the top-K.  
 #
 # 
 
@@ -24,30 +24,12 @@ INF = float('inf')
 
 
 class Frontier(object):
+  """
+  Note: in the code, we end up using CheapFrontier below because it is
+  way faster and just as good (empirically)
+  """
   _id = 0
 
-  """
-  Iteratively look for the skyline of a list of influence functions
-  by identifying intersection points while scanning from left to right
-
-  The module is actually passed lists of Cluster objects, which implement
-  an influence function: 
-
-      c.inf_func(c_value) -> influence value
-
-  while heap:
-    if init
-      for the top cluster at c_range[0]
-        find intersection points with all other clusters
-        pick next intersection point, add to heap
-    else
-      swap at intersection point
-      find intersection points with all other clusters
-      pick next intersection point, add to heap
-
-  NOTE: picks _at most one_ function on the frontier, not _all_
-        functions on the frontier
-  """
   def __init__(self, c_range, min_granularity=0):
     """
     Args
@@ -82,10 +64,12 @@ class Frontier(object):
   @instrument
   def frontier_to_clusters(self, frontier):
     """
-    Return a list of clusters with proper bounds
+    Return a list of clusters with proper bounds 
     avoid cloning cluster if possible
     Args:
       list of (cluster, start, end)
+    Return:
+      list of (possibly new) clusters with the correct c_ranges
     """
     ret = set()
     for cur, start, end in frontier:
@@ -95,43 +79,11 @@ class Frontier(object):
 
     return ret
 
-  
-  def intersect_ranges(self, c1, c2):
-    """
-    @deprecated
-    Given two clusters, split them up by the bounds where they are each 
-    optimal
-    """
-    frontier = self.get_frontier([c1, c2])
-    d = defaultdict(list)
-    for c, s, e in frontier:
-      d[c.id].append((s, e))
-    
-    c1s, c2s = [], []
-
-    for (s, e) in d[c1.id]:
-      c = c1.clone()
-      c.c_range = r_intersect([s, e], c1.c_range)
-      c1s.append(c)
-    if not c1s:
-      c1.c_range = [c1.c_range[0], c1.c_range[0]]
-
-    
-    for (s, e) in d[c2.id]:
-      c = c2.clone()
-      c.c_range = r_intersect([s, e], c2.c_range)
-      c2s.append(c)
-    if not c2s:
-      c2.c_range = [c2.c_range[0], c2.c_range[0]]
-
-    return c1s, c2s
-
-
 
   @instrument
   def get_frontier(self, clusters):
     """
-    Groups clusters by non-overlapping c_ranges first
+    Groups clusters by non-overlapping c_ranges
     """
     groups = self.group_by_crange(clusters)
     ret = []
@@ -141,11 +93,39 @@ class Frontier(object):
  
   def _get_frontier(self, clusters):
     """
-    Core method that computes increasing intersections
-    Rteurn:
-      list of (cluster, start, end) 
+    This is the workhorse function
+
+    Iteratively look for the skyline of a list of influence functions
+    by identifying intersection points while scanning from left to
+    right
+
+    The module passed a list of objects that implement
+    an influence function: 
+
+        c.inf_func(c_value) -> influence value
+
+    This implementation explicitly computes the intersection points
+    between influence functions and uses those to determine the
+    frontier:
+
+    while heap:
+      if init
+        for the top cluster at c_range[0]
+          find intersection points with all other clusters
+          pick next intersection point, add to heap
+      else
+        swap at intersection point
+        find intersection points with all other clusters
+        pick next intersection point, add to heap
+
+    NOTE: if there are multiple objects on the frontier, it will
+          arbitrarily pick one of them.
+
+    Return:
+      list of (cluster, min-c, max-c) 
     """
-    # XXX: doesn't work for intersections of >2 models
+
+    # XXX: doesn't work if >2 models intersect at the same frontier point.
     if not clusters: return []
 
 
@@ -225,10 +205,11 @@ class Frontier(object):
 
 class ContinuousFrontier(Frontier):
   """
-  Maintains the frontier across a "stream" of cluster objects
+  Extends Frontier with an update(clusters) function and internally
+  tracks the frontier across all clusters passed into the update()
+  function.
 
-  The update() method updates the internal set of clusters on the 
-  frontier.
+  Useful for computing the frontier over a "stream" of cluster objects.
   """
 
 
@@ -252,6 +233,10 @@ class ContinuousFrontier(Frontier):
 
   @instrument
   def intersections_with_frontier(self, cluster):
+    """
+    Return: 
+      clusters on the frontier whose c_ranges intersect with argument
+    """
     for c in self.frontier:
       if r_vol(r_intersect(c.c_range, cluster.c_range)):
         yield c
@@ -259,6 +244,13 @@ class ContinuousFrontier(Frontier):
 
   @instrument
   def update(self, clusters):
+    """
+    Merge clusters argument with internally maintained frontier
+    
+    Return: (adds, rms)
+      adds: subset of clusters that have been added
+      rms:  subset of original frontier that have been removed
+    """
     adds, rms, new_spans = self.probe(clusters)
 
     new_clusters = self.frontier_to_clusters(new_spans)
@@ -275,6 +267,8 @@ class ContinuousFrontier(Frontier):
   @instrument
   def probe(self, clusters):
     """
+    Workhorse of this class
+
     merge clusters in argument with existing frontier
     """
     new_spans = []
@@ -295,6 +289,8 @@ class ContinuousFrontier(Frontier):
         # the following is indexed into using is_c_best
         pair = [cand, c]
 
+        # use the intersection method to find c_ranges
+        # where each cluster dominates
         cur_inter = valid_bound[0]
         while cur_inter < valid_bound[1]:
           root = self.heap(c, cand, cur_inter)
@@ -316,6 +312,10 @@ class ContinuousFrontier(Frontier):
       else:
         new_spans.extend(c_new_spans)
 
+    #
+    # make sure to return the actual cluster objects that
+    # have been added/removed and not their clones
+    #
     rms = set([c for c, n in beaten_counts.iteritems() if n > 0])
     new_spans = filter(lambda s: s[2] > s[1], new_spans)
     new_spans = filter(lambda s: s[0] in arg_frontier or s[0] in rms, new_spans)
@@ -375,6 +375,9 @@ class CheapFrontier(Frontier):
     """
     Computes an equi-height histogram of the median influences across the clusters
     and returns the x values of each bucket, normalized between 0 and 1
+
+    Based on the intuition that we should sample more at lower c 
+    values than higher values.
     """
     if nblocks in CheapFrontier.buckets_cache:
       return CheapFrontier.buckets_cache[nblocks]
@@ -471,6 +474,13 @@ class CheapFrontier(Frontier):
     return self.all_infs_to_spans(clusters, all_infs, thresholds)
 
   def all_infs_to_spans(self, clusters, all_infs, thresholds=None):
+    """
+    Given the influences of each cluster at every c bucket, and a 
+    threshold, return the top-K clusters as ranges.
+
+    Return:
+      list of (cluster, min-c, max-c)
+    """
     if self.overlap:
       mult = np.arange(len(all_infs[0]))
       mult = ((mult.max() - mult) + 1.) / mult.max() / 10. + 1.
@@ -492,6 +502,8 @@ class CheapFrontier(Frontier):
     Compute the c ranges where cluster's influence is >= the threshold
     Args:
       infs: vector of influence for each c value
+    Return:
+      list of (cluster, min-c, max-c)
     """
     if thresholds is None: 
       thresholds = self.thresholds
