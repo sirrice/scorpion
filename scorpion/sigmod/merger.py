@@ -26,11 +26,9 @@ _logger = get_logger()
 
 class Merger(object):
     """
-    Merges clusters
-
-    transparently scales
-    - cluster bounding boxes by table bounds
-    - errors by min/max error
+    Naive implementation of the merger.
+    Given a single c value, iteratively merges the top clusters until it 
+    converges.
     """
 
     def __init__(self, **kwargs):

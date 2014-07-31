@@ -243,7 +243,7 @@ class Basic(object):
 
 
   def all_unit_clauses(self, attr):
-      # continuous: split 1000 ways, uniformly
+      # continuous: split 100 ways, uniformly
       # discrete: every unique value
       attrobj = self.full_table.domain[attr]
       idx = self.full_table.domain.index(attrobj)

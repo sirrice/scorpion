@@ -26,11 +26,10 @@ _logger = get_logger()
 
 class BaseRangeMerger(Merger):
   """
-  Merges clusters
+  Merges clusters by computing the frontier of all the clusters and 
+  iteratively expands the frontier until convergence.
 
-  transparently scales
-  - cluster bounding boxes by table bounds
-  - errors by min/max error
+  Accepts all of the clusters from the partitioner at once.
   """
 
 
@@ -426,6 +425,18 @@ class RangeMerger(BaseRangeMerger):
 
 
 class RangeMerger2(BaseRangeMerger):
+  """
+  Variation of the above merger that merges clusters one axis at a time. 
+  The merging algorithm works as follows for a given cluster C:
+
+    * find C's neighbors
+    * merge their rules with C's
+    * for each attribute, find all of the values the merged clusters expand to
+      attribute i -> [v1, v2,.... ]
+    * expand each attribute _and compute its influence_
+      in increasing order from smallest value to largest
+    * don't try larger values if a smaller value doesn't result in a better cluster
+  """
 
   def pick_expansion_vals(self, cluster, dim, direction, vals):
     if len(vals) == 0: return vals

@@ -24,6 +24,7 @@ _logger = get_logger()
 class FeatureMapper(object):
   """
   For discrete features
+  Maps discrete attribute values to a numerical ID
   """
 
   def __init__(self, domain, cont_dists):

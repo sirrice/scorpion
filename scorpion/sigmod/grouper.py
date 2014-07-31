@@ -1,3 +1,9 @@
+"""
+Helper file for MR algorithm.
+
+Grouper takes the input table and computes groups for each attribute, and 
+provides an iterator for all combinations up to N dimensions.
+"""
 import time
 import pdb
 import sys
@@ -23,6 +29,12 @@ _logger = get_logger()
 
 
 class Blah(object):
+  """
+  Redundant with bottomup.Cluster and SDRule.
+  simply tracks the influence function for a given rule
+
+  XXX: needs to be refactored.
+  """
   def __init__(
       self, attrs, group, 
       bds, bcs, gds, gcs, 
@@ -174,10 +186,13 @@ class Grouper(object):
     self.setup_functions()
 
   def setup_functions(self):
+    """
+    Precomputes buckets and attribute-value -> bucket id functions
+    """
     domain = self.data.domain
     ddists = Orange.statistics.distribution.Domain(self.data)
-    self.ddists = ddists
     bdists = Orange.statistics.basic.Domain(self.data)
+    self.ddists = ddists
     self.bdists = bdists
     gbfuncs = {}
     gbids = {}
@@ -187,7 +202,7 @@ class Grouper(object):
       if attr.name not in self.mr.cols:
         continue
       if attr.var_type == Orange.feature.Type.Discrete:
-        groups = self.create_discrete_groups(attr, idx, ddists[idx].keys())
+        groups = [(val,) for val in sorted(ddists[idx].keys())]
         mapper = {}
         for gidx, group in enumerate(groups):
           for val in group:
@@ -225,8 +240,6 @@ class Grouper(object):
     self.gbids = gbids
     self.id2vals = id2vals
 
-  def create_discrete_groups(self, attr, pos, vals):
-    return [(val,) for val in sorted(vals)]
 
   def _get_infs(self, all_table_rows, err_funcs, g, bmaxinf):
     """
@@ -255,6 +268,9 @@ class Grouper(object):
     return ret, counts, maxinf
 
   def influence_tuple(self, row, ef):
+    """
+    Compute and cache row's influence
+    """
     if row[self.mr.SCORE_ID].value == float('-inf'):
       influence = ef((row,))
       row[self.mr.SCORE_ID] = influence
@@ -271,6 +287,10 @@ class Grouper(object):
 
 
   def __call__(self, attrs, valid_groups):
+    """
+    Given a list of valid group ids for each attribute, returns an iterator
+    of all combinations of two different groups
+    """
     valid_groups = set(valid_groups)
     bad_table_rows = []
     good_table_rows = []
@@ -288,15 +308,11 @@ class Grouper(object):
       yield Blah(attrs, g, bds, bcs, gds, gcs, maxinf, self.mr, self)
 
 
-
-
   def initial_groups(self):
     keys = sorted(self.gbids.keys(), key=lambda a: a.name)
     for attr in keys:
       n = self.gbids[attr]
       yield (attr,), ((i,) for i in xrange(n))
-
-
 
 
   def merge_groups(self, prev_groups):
@@ -341,9 +357,9 @@ class Grouper(object):
     matches2 = defaultdict(list)
     try:
       for g1 in groups1:
-          matches1[make_key(g1)].append(g1[union[idx1]])
+        matches1[make_key(g1)].append(g1[union[idx1]])
       for g2 in groups2:
-          matches2[make_key(g2)].append(g2[union[idx2]])
+        matches2[make_key(g2)].append(g2[union[idx2]])
     except:
       pdb.set_trace()
 

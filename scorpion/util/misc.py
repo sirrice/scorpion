@@ -120,6 +120,9 @@ def mkfmt(arr, sep='\t', mapping=None):
 def pluck(o, keys=[]):
   return [o.get(key, None) for key in keys]
 
+def pick(l, key):
+  return [v[key] for v in l]
+
 
 def block_iter(l, nblocks=2):
   """

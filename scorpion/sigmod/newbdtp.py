@@ -1,3 +1,11 @@
+"""
+@deprecated
+
+Attempt to use a globally ordered queue to manage the nodes that
+should be grown.  Turns out it's tricky to decide on a good scoring
+function.  
+"""
+
 import time
 import pdb
 import sys

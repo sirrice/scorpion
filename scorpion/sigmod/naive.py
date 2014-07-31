@@ -64,9 +64,9 @@ class Naive(Basic):
       for m in xrange(1, max_card+1):
         if self.stop:
           break
-        self.foo(base_rule, max_card=m)
+        self.exhaustive_search(base_rule, max_card=m)
     else:
-      self.foo(base_rule)
+      self.exhaustive_search(base_rule)
     self.cost = time.time() - start
 
 
@@ -90,7 +90,7 @@ class Naive(Basic):
         lens.append(len(attr.values))
     return lens and max(lens) or 0
 
-  def foo(self, rule, max_card=None):
+  def exhaustive_search(self, rule, max_card=None):
     for cols in powerset(self.cols):
       if not cols:
         continue

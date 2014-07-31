@@ -26,6 +26,10 @@ _logger = get_logger()
     
  
 class StreamRangeMerger(RangeMerger2):
+  """
+  Streaming version of the range merger.  This lets Scorpion 
+  overlap the partitioning algorithm with the merging algorithm.
+  """
   def __init__(self, *args, **kwargs):
     super(StreamRangeMerger, self).__init__(*args, **kwargs)
 

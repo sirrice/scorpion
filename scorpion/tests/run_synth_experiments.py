@@ -7,7 +7,9 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import Rectangle as Rect
 from matplotlib import cm 
 
-
+from scorpion.sigmod.svm import SVM
+from scorpion.sigmod.clique import MR
+from scorpion.sigmod.bdt import BDT
 
 def run_synth(db, pp, ndim, uo, volperc):
   defaults = {
@@ -61,6 +63,7 @@ def run_synth(db, pp, ndim, uo, volperc):
 
     #params['klass'] = BDT
     #run(db, tablename, pp, params=params)
+
 
     params['klass'] = MR 
     run(db, tablename, pp, params=params)

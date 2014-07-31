@@ -47,21 +47,21 @@ DEFAULT_PARAMS = {
   'p': 0.7
 }
 
-def pick(l, key):
-  return [v[key] for v in l]
-
 def parallel_debug(sharedobj, **kwargs):
   for aggerr in sharedobj.errors:
     runner(sharedobj, aggerr, **kwargs)
   
 
 def runner(sharedobj, aggerr, **kwargs):
+  """
+  Execute Scorpion and update the sharedobj with results
+  """
   random.seed(2)
   sql = sharedobj.sql
   badresults = aggerr.keys
   label = aggerr.agg.shortname
   if not badresults:
-      return
+    return
 
   try:
     learner, table, rules, top_k_rules = serial_hybrid(sharedobj, aggerr, **kwargs)
@@ -124,6 +124,9 @@ def load_tables(obj, aggerr, **kwargs):
 
 
 def rules_to_clusters(rules, learner):
+  """
+  Convert SDRule objects into Cluster objects
+  """
   clusters = []
   fill_in_rules(
     rules, 
@@ -173,7 +176,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
   learner.setup_tables(all_full_table, bad_tables, good_tables)
   simplify = lambda r: r.simplify(cdists=learner.cont_dists, ddists=learner.disc_dists) 
   parallel = params.get('parallel', False)
-  print "executing in parallel?", parallel
+  _logger.debug("executing in parallel?  %s", parallel)
 
   start = time.time()
 
@@ -185,6 +188,8 @@ def serial_hybrid(obj, aggerr, **kwargs):
     rules, keyidxs = zip(*allpairs)
     clusters = instrument(rules_to_clusters)(learner, rules, learner)
 
+    # top_k_json_rules stores the top-k rules for various
+    # c values
     if 'cs' in params:
       c_vals = params['cs']
     elif 'c' in params:
@@ -207,7 +212,7 @@ def serial_hybrid(obj, aggerr, **kwargs):
     proc = Process(target=merger_process_f, args=args)
     proc.start()
 
-    # loop
+    # push rules from partitioner to the merger process
     all_json_pairs = []
     for pairs in learner(all_full_table, bad_tables, good_tables):
       if not pairs: continue
@@ -228,7 +233,9 @@ def serial_hybrid(obj, aggerr, **kwargs):
     par2chq.close()
     learner.update_status("waiting for merging step to finish")
 
+    #
     # wait for results from merger to come back
+    #
     json_rules = ch2parq.get()
     rules = [SDRule.from_json(d, learner.full_table) for d in json_rules]
 
@@ -244,6 +251,9 @@ def serial_hybrid(obj, aggerr, **kwargs):
     clusters = instrument(rules_to_clusters)(learner, rules, learner)
 
   else:
+    #
+    # execute the partitioner and merger serially 
+    #
     mparams = dict(params)
     mparams.update({
       'learner_hash': hash(learner),
@@ -342,6 +352,10 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
     status = None
 
   def update_status(msg):
+    """
+    Stores the best results so far into "status" database
+    so the UI can track progress
+    """
     if status is None: return
     start = time.time()
     merged = list(merger.best_so_far(True))
@@ -448,6 +462,15 @@ def merger_process_f(learner, aggerr, params, _logger, (in_conn, out_conn)):
 
 
 
+"""
+The following methods group and filter a set of cluster objects.  
+For example it 
+
+1. removes rules whose influence is below a threshold
+2. removes and combines redundant rules
+3. removes rules that are subsets of better rules
+
+"""
 
 def group_clusters(clusters, learner):
   """
