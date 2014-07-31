@@ -59,7 +59,7 @@ class StreamRangeMerger(RangeMerger2):
     if len(self.learner.full_table) < 10000:
       self.nblocks = 100
 
-    self.get_frontier = CheapFrontier(self.c_range, K=self.K, nblocks=self.nblocks)
+    self.get_frontier = CheapFrontier(self.c_range, K=self.K, nblocks=self.nblocks, learner=self.learner)
     self.get_frontier.stats = self.stats
 
 
@@ -72,7 +72,7 @@ class StreamRangeMerger(RangeMerger2):
 
   def get_frontier_obj(self, version):
     while version >= len(self.frontiers):
-      frontier = CheapFrontier(self.c_range, K=self.K, nblocks=self.blocks)
+      frontier = CheapFrontier(self.c_range, K=self.K, nblocks=self.blocks, learner=self.learner)
       frontier.stats = self.stats
       self.frontiers.append(frontier)
     return self.frontiers[version]
@@ -322,6 +322,8 @@ class StreamRangeMerger(RangeMerger2):
   @instrument
   def update_rejected_directions(self, cluster, dim, direction, val):
     if direction == 'disc':
+      if not hasattr(val, '__iter__'):
+        val = [val]
       for v in list(val):
         self.rejected_disc_vals[dim].append(set([v]))
         self.failed_disc_vals[dim][str(v)] += 1
@@ -334,7 +336,7 @@ class StreamRangeMerger(RangeMerger2):
   def greedy_expansion(self, cluster, seen, version=None, frontier=None):
     _logger.debug("merger\tgreedy_expand\t%s", cluster.rule.simplify())
     if frontier is None:
-      frontier = CheapFrontier(self.c_range, K=1, nblocks=15)
+      frontier = CheapFrontier(self.c_range, K=1, nblocks=15, learner=self.learner)
       frontier.stats = self.stats
       frontier.update([cluster])
 
@@ -397,7 +399,7 @@ class PartitionedStreamRangeMerger(StreamRangeMerger):
   def get_frontier_obj(self, version, partitionkey):
     frontiers = self.frontiers[partitionkey]
     while version >= len(frontiers):
-      frontier = CheapFrontier(self.c_range, K=self.K, nblocks=self.nblocks)
+      frontier = CheapFrontier(self.c_range, K=self.K, nblocks=self.nblocks, learner=self.learner)
       frontier.stats = self.stats
       frontiers.append(frontier)
     return frontiers[version]

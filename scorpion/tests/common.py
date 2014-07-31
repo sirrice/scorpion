@@ -1,3 +1,4 @@
+import pdb
 import sys
 import random
 import time
@@ -152,6 +153,7 @@ def run_experiment(datasetidx, **kwargs):
 
     #costs['cost_merge'] = costs.get('cost_merge', 0) - (costs.get('merge_load_from_cache',(0,))[0] + costs.get('merge_cache_results', (0,))[0])
     #costs['cost_total'] = cost
+    pdb.set_trace()
     learner, table, rules, c2rules = serial_hybrid(obj, aggerr, **params)
     truth = set(get_ground_truth(table))
     ft = table

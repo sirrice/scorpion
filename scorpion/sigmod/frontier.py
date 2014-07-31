@@ -12,11 +12,13 @@ import random
 import numpy as np
 import sys
 import time
+
+from itertools import izip
 from collections import *
 from scipy.optimize import fsolve
-sys.path.extend(['.', '..'])
 
 from scorpion.util import *
+from scorpion.sigmod.overlap import OverlapPenalty
 
 INF = float('inf')
 
@@ -335,7 +337,7 @@ class CheapFrontier(Frontier):
   """
   buckets_cache = {}
 
-  def __init__(self, c_range, min_granularity=0, K=3, nblocks=100):
+  def __init__(self, c_range, min_granularity=0, K=3, nblocks=100, learner=None):
     """
     Args
       min_granularity: minimum distance between adjacent intersections
@@ -359,10 +361,20 @@ class CheapFrontier(Frontier):
     self.frontier_infs = []
     self.threshold = np.zeros(self.nblocks).astype(float)
 
+    self.overlap = None
+    if learner:
+      self.overlap = OverlapPenalty(
+        learner.full_table.domain, 
+        learner.cont_dists, 
+        learner.disc_dists
+      )
+
+
   @staticmethod
   def compute_normalized_buckets(nblocks, clusters=[]):
     """
-    return distribution of x buckets, normalized to be between 0 and 1
+    Computes an equi-height histogram of the median influences across the clusters
+    and returns the x values of each bucket, normalized between 0 and 1
     """
     if nblocks in CheapFrontier.buckets_cache:
       return CheapFrontier.buckets_cache[nblocks]
@@ -374,6 +386,7 @@ class CheapFrontier(Frontier):
     for c in clusters:
       inf_funcs.append(c.inf_func)
 
+    # make up some random influence curves to not bias
     while len(inf_funcs) < 50:
       tops = np.random.rand(6) * 20
       bots = np.random.rand(6) * 20 + 1.
@@ -409,6 +422,13 @@ class CheapFrontier(Frontier):
 
   @instrument
   def compute_thresholds(self, all_infs, thresholds=None, K=None):
+    """
+    Compute the K'th highest influence at each c value, 
+    Args:
+      all_infs: array.  each row is a cluster.  each column is a c value.  each cell is the influence.
+      thresholds: existing thresholds if any
+      K: defined threshold at a top K cutoff
+    """
     if thresholds is None:
       thresholds = np.zeros(self.nblocks).astype(float)
       thresholds[:] = -1e100
@@ -451,14 +471,28 @@ class CheapFrontier(Frontier):
     return self.all_infs_to_spans(clusters, all_infs, thresholds)
 
   def all_infs_to_spans(self, clusters, all_infs, thresholds=None):
+    if self.overlap:
+      mult = np.arange(len(all_infs[0]))
+      mult = ((mult.max() - mult) + 1.) / mult.max() / 10. + 1.
+      keyf = lambda (c, infs): (mult*infs).max()
+      clusters, all_infs = zip(*sorted(zip(clusters, all_infs), key=keyf, reverse=True))
+      weights = self.overlap(clusters)
+    else:
+      weights = np.ones(len(clusters))
+
     ret = []
-    for idx, c in enumerate(clusters):
-      infs = all_infs[idx]
+    for infs, c, weight in izip(all_infs, clusters, weights):
+      infs = infs * weight
       ret.extend(self.infs_to_spans(c, infs, thresholds))
     return ret
 
   @instrument
   def infs_to_spans(self, cluster, infs, thresholds=None):
+    """
+    Compute the c ranges where cluster's influence is >= the threshold
+    Args:
+      infs: vector of influence for each c value
+    """
     if thresholds is None: 
       thresholds = self.thresholds
 
@@ -505,14 +539,16 @@ class CheapFrontier(Frontier):
     
     clusters = [c for c in clusters if c.bound_hash not in self.seen]
 
+    # influences of arguments and frontier clusters
     arg_infs = [self.cluster_infs(c) for c in clusters]
     arg_infs.extend(self.frontier_infs)
     all_infs = np.array(arg_infs)
+
     all_clusters = list(clusters)
     all_clusters.extend(self.frontier)
+
     self.thresholds = self.compute_thresholds(all_infs, K=K)
     spans = self.all_infs_to_spans(all_clusters, all_infs, self.thresholds)
-
     span_hashes = set([tup[0].bound_hash for tup in spans])
     in_hash = lambda c: c.bound_hash in span_hashes
 

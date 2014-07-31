@@ -162,223 +162,206 @@ class Blah(object):
 
 
 class Grouper(object):
-    def __init__(self, table, mr):
-        self.data = table
-        self.mr = mr
-        self.ddists = None
-        self.bdists = None
-        self.gbids = {}
-        self.id2vals = {}
-        self.gbfuncs = {}
-        self.mappers = {}
-        self.setup_functions()
+  def __init__(self, table, mr):
+    self.data = table
+    self.mr = mr
+    self.ddists = None
+    self.bdists = None
+    self.gbids = {}
+    self.id2vals = {}
+    self.gbfuncs = {}
+    self.mappers = {}
+    self.setup_functions()
 
-    def setup_functions(self):
-        domain = self.data.domain
-        ddists = Orange.statistics.distribution.Domain(self.data)
-        self.ddists = ddists
-        bdists = Orange.statistics.basic.Domain(self.data)
-        self.bdists = bdists
-        gbfuncs = {}
-        gbids = {}
-        id2vals = {}
+  def setup_functions(self):
+    domain = self.data.domain
+    ddists = Orange.statistics.distribution.Domain(self.data)
+    self.ddists = ddists
+    bdists = Orange.statistics.basic.Domain(self.data)
+    self.bdists = bdists
+    gbfuncs = {}
+    gbids = {}
+    id2vals = {}
 
-        for idx, attr in enumerate(self.data.domain):
-          if attr.name not in self.mr.cols:
+    for idx, attr in enumerate(self.data.domain):
+      if attr.name not in self.mr.cols:
+        continue
+      if attr.var_type == Orange.feature.Type.Discrete:
+        groups = self.create_discrete_groups(attr, idx, ddists[idx].keys())
+        mapper = {}
+        for gidx, group in enumerate(groups):
+          for val in group:
+            mapper[val] = gidx
+        self.mappers[attr] = mapper
+
+        f = lambda v: int(self.mappers[v.variable].get(v.value, len(groups)))
+        n = len(groups)
+        ranges = groups
+      else:
+        dist = bdists[idx]
+        maxv, minv = dist.max, dist.min
+        if maxv == minv:
+          f = lambda v: 0
+          n = 1
+          ranges = [(minv, maxv)]
+        else:
+          def make_func(minv, block):
+            def f(v):
+              return int(math.ceil((v-minv)/block)) 
+            return f
+          block = (maxv - minv) / float(self.mr.granularity)
+          n = self.mr.granularity #+1
+          f = make_func(minv, block)
+          ranges = [(maxv - (i+1)*block, maxv - (i)*block) for i in xrange(n-1,-1,-1)]
+          ranges[0] = [-float('infinity'), ranges[0][1]]
+          ranges[-1] = [ranges[-1][0], float('infinity')]
+          print attr, block, minv, maxv
+
+      gbfuncs[attr] = f
+      gbids[attr] = n
+      id2vals[attr] = dict(enumerate(ranges))
+
+    self.gbfuncs = gbfuncs
+    self.gbids = gbids
+    self.id2vals = id2vals
+
+  def create_discrete_groups(self, attr, pos, vals):
+    return [(val,) for val in sorted(vals)]
+
+  def _get_infs(self, all_table_rows, err_funcs, g, bmaxinf):
+    """
+    Args:
+      all_table_rows: list, each item is a dict of
+                      group -> rows in that group (e.g., predicate)
+      g: the group
+      bmaxinf: want max inf of individual rows
+    """
+    ret = []
+    counts = []
+    maxinf = float('-inf')
+    iterator = zip(enumerate(err_funcs), all_table_rows)
+    for (idx, ef), table_rows in iterator:
+      rows = table_rows.get(g, [])
+      if not rows:
+        continue
+      
+      if bmaxinf:
+        for row in rows:
+          curinf = self.influence_tuple(row, ef)
+          maxinf = max(maxinf, curinf) 
+
+      ret.append(ef(rows))
+      counts.append(len(rows))
+    return ret, counts, maxinf
+
+  def influence_tuple(self, row, ef):
+    if row[self.mr.SCORE_ID].value == float('-inf'):
+      influence = ef((row,))
+      row[self.mr.SCORE_ID] = influence
+    return row[self.mr.SCORE_ID].value
+
+  def groups_by_attrs(self, attrs, valid_groups, table):
+    """scan table once and group tuples by their respective groups"""
+    groups = defaultdict(list)
+    for row in table:
+      group = tuple([self.gbfuncs[attr](row[attr]) for attr in attrs])
+      if group in valid_groups:
+        groups[group].append(row)
+    return groups
+
+
+  def __call__(self, attrs, valid_groups):
+    valid_groups = set(valid_groups)
+    bad_table_rows = []
+    good_table_rows = []
+    for table in self.mr.bad_tables:
+      bad_table_rows.append(self.groups_by_attrs(attrs, valid_groups, table))
+    for table in self.mr.good_tables:
+      good_table_rows.append(self.groups_by_attrs(attrs, valid_groups, table))
+
+    for g in valid_groups:
+      # compute the influence_state for each group (cube)
+      bds, bcs, maxinf = self._get_infs(bad_table_rows, self.mr.bad_err_funcs, g, True)
+      gds, gcs, _ = self._get_infs(good_table_rows, self.mr.good_err_funcs, g, False)
+      if not bcs:
+        continue
+      yield Blah(attrs, g, bds, bcs, gds, gcs, maxinf, self.mr, self)
+
+
+
+
+  def initial_groups(self):
+    keys = sorted(self.gbids.keys(), key=lambda a: a.name)
+    for attr in keys:
+      n = self.gbids[attr]
+      yield (attr,), ((i,) for i in xrange(n))
+
+
+
+
+  def merge_groups(self, prev_groups):
+    """
+    prev_groups: attributes -> groups
+    attributes are sorted
+    group: attr -> idx
+    """
+    start = time.time()
+    attrs_list = sorted(prev_groups.keys())
+    for a_idx, attrs1 in enumerate(attrs_list):
+      sattrs1 = set(attrs1)
+      pgroup1 = [dict(zip(attrs1, g)) for g in prev_groups[attrs1]]
+      for attrs2 in attrs_list[a_idx+1:]:
+        pgroup2 = [dict(zip(attrs2, g)) for g in prev_groups[attrs2]]
+
+        sattrs2 = set(attrs2)
+        merged_attrs = tuple(sorted(sattrs1.union(sattrs2)))
+        if len(merged_attrs) != len(sattrs1)+1:
             continue
-          if attr.var_type == Orange.feature.Type.Discrete:
-            groups = self.create_discrete_groups(attr, idx, ddists[idx].keys())
-            mapper = {}
-            for gidx, group in enumerate(groups):
-                for val in group:
-                    mapper[val] = gidx
-            self.mappers[attr] = mapper
+        intersecting = tuple(sorted(sattrs1.intersection(sattrs2)))
 
-            f = lambda v: int(self.mappers[v.variable].get(v.value, len(groups)))
-            n = len(groups)
-            ranges = groups
-          else:
-            dist = bdists[idx]
-            maxv, minv = dist.max, dist.min
-            if maxv == minv:
-              f = lambda v: 0
-              n = 1
-              ranges = [(minv, maxv)]
-            else:
-              def make_func(minv, block):
-                def f(v):
-                  return int(math.ceil((v-minv)/block)) 
-                return f
-              block = (maxv - minv) / float(self.mr.granularity)
-              n = self.mr.granularity #+1
-              f = make_func(minv, block)
-              ranges = [(maxv - (i+1)*block, maxv - (i)*block) for i in xrange(n-1,-1,-1)]
-              ranges[0] = [-float('infinity'), ranges[0][1]]
-              ranges[-1] = [ranges[-1][0], float('infinity')]
-              print attr, block, minv, maxv
+        unique1 = tuple(sattrs1.difference(sattrs2))[0]
+        unique2 = tuple(sattrs2.difference(sattrs1))[0]
+        idx1 = merged_attrs.index(unique1)
+        idx2 = merged_attrs.index(unique2)
 
-          gbfuncs[attr] = f
-          gbids[attr] = n
-          id2vals[attr] = dict(enumerate(ranges))
+        diff = time.time() - self.mr.start
+        if diff >= self.mr.max_wait:
+          _logger.debug("wait %d > %d exceeded" % (diff, self.mr.max_wait))
+          return
 
-        self.gbfuncs = gbfuncs
-        self.gbids = gbids
-        self.id2vals = id2vals
+        yield (merged_attrs, self.fulljoin(intersecting, merged_attrs, idx1, idx2, pgroup1, pgroup2))
 
-    def create_discrete_groups(self, attr, pos, vals):
-        return [(val,) for val in sorted(vals)]
-        if len(vals) == 1:
-            return (vals,)
+  def fulljoin(self, inter, union, idx1, idx2, groups1, groups2):
+    def make_key(group):
+      ret = [group.get(k, None) for k in union]
+      ret[idx1] = ret[idx2] = None
+      return tuple(ret)
 
-        rule = SDRule(self.data, None, [orange.ValueFilter_discrete(
-            position = pos, 
-            values = [orange.Value(attr,v) for v in vals]
-        )], None)
-        ro = RuleObj(rule, self.mr)
+    matches1 = defaultdict(list)
+    matches2 = defaultdict(list)
+    try:
+      for g1 in groups1:
+          matches1[make_key(g1)].append(g1[union[idx1]])
+      for g2 in groups2:
+          matches2[make_key(g2)].append(g2[union[idx2]])
+    except:
+      pdb.set_trace()
 
-        if not self.mr.prune_rule(ro):
-            return (vals,)
+    seen = set()
 
-        ret = []
-        for newvals in block_iter(vals, 2):
-            ret.extend(self.create_discrete_groups(attr, pos, newvals))
-        return ret
+    for key in matches1.keys():
+      if key not in matches2:
+        continue
 
+      for v1 in matches1[key]:
+        for v2 in matches2[key]:
+          newg = list(key)
+          newg[idx1] = v1
+          newg[idx2] = v2
+          newg = tuple(newg)
+          if newg in seen:
+            continue
+          seen.add(newg)
+    return seen
 
-    def _get_infs(self, all_table_rows, err_funcs, g, bmaxinf):
-      """
-      Args:
-        all_table_rows: list, each item is a dict of
-                        group -> rows in that group (e.g., predicate)
-        g: the group
-        bmaxinf: want max inf of individual rows
-      """
-      ret = []
-      counts = []
-      maxinf = float('-inf')
-      iterator = zip(enumerate(err_funcs), all_table_rows)
-      for (idx, ef), table_rows in iterator:
-        rows = table_rows.get(g, [])
-        if not rows:
-          continue
-        
-        if bmaxinf:
-          for row in rows:
-            curinf = self.influence_tuple(row, ef)
-            maxinf = max(maxinf, curinf) 
-
-        ret.append(ef(rows))
-        counts.append(len(rows))
-      return ret, counts, maxinf
-
-    def influence_tuple(self, row, ef):
-      if row[self.mr.SCORE_ID].value == float('-inf'):
-        influence = ef((row,))
-        row[self.mr.SCORE_ID] = influence
-      return row[self.mr.SCORE_ID].value
-
-    def groups_by_attrs(self, attrs, valid_groups, table):
-      """scan table once and group tuples by their respective groups"""
-      groups = defaultdict(list)
-      for row in table:
-        group = tuple([self.gbfuncs[attr](row[attr]) for attr in attrs])
-        if group in valid_groups:
-          groups[group].append(row)
-      return groups
-
-
-    def __call__(self, attrs, valid_groups):
-      valid_groups = set(valid_groups)
-      bad_table_rows = []
-      good_table_rows = []
-      for table in self.mr.bad_tables:
-        bad_table_rows.append(self.groups_by_attrs(attrs, valid_groups, table))
-      for table in self.mr.good_tables:
-        good_table_rows.append(self.groups_by_attrs(attrs, valid_groups, table))
-
-      for g in valid_groups:
-        # compute the influence_state for each group (cube)
-        bds, bcs, maxinf = self._get_infs(bad_table_rows, self.mr.bad_err_funcs, g, True)
-        gds, gcs, _ = self._get_infs(good_table_rows, self.mr.good_err_funcs, g, False)
-        if not bcs:
-          continue
-        yield Blah(attrs, g, bds, bcs, gds, gcs, maxinf, self.mr, self)
-
-
-
-
-    def initial_groups(self):
-      keys = sorted(self.gbids.keys(), key=lambda a: a.name)
-      for attr in keys:
-        n = self.gbids[attr]
-        yield (attr,), ((i,) for i in xrange(n))
-
-
-
-
-    def merge_groups(self, prev_groups):
-      """
-      prev_groups: attributes -> groups
-      attributes are sorted
-      group: attr -> idx
-      """
-      start = time.time()
-      attrs_list = sorted(prev_groups.keys())
-      for a_idx, attrs1 in enumerate(attrs_list):
-        sattrs1 = set(attrs1)
-        pgroup1 = [dict(zip(attrs1, g)) for g in prev_groups[attrs1]]
-        for attrs2 in attrs_list[a_idx+1:]:
-          pgroup2 = [dict(zip(attrs2, g)) for g in prev_groups[attrs2]]
-
-          sattrs2 = set(attrs2)
-          merged_attrs = tuple(sorted(sattrs1.union(sattrs2)))
-          if len(merged_attrs) != len(sattrs1)+1:
-              continue
-          intersecting = tuple(sorted(sattrs1.intersection(sattrs2)))
-
-          unique1 = tuple(sattrs1.difference(sattrs2))[0]
-          unique2 = tuple(sattrs2.difference(sattrs1))[0]
-          idx1 = merged_attrs.index(unique1)
-          idx2 = merged_attrs.index(unique2)
-
-          diff = time.time() - self.mr.start
-          if diff >= self.mr.max_wait:
-            _logger.debug("wait %d > %d exceeded" % (diff, self.mr.max_wait))
-            return
-
-          yield (merged_attrs, self.fulljoin(intersecting, merged_attrs, idx1, idx2, pgroup1, pgroup2))
-
-    def fulljoin(self, inter, union, idx1, idx2, groups1, groups2):
-      def make_key(group):
-        ret = [group.get(k, None) for k in union]
-        ret[idx1] = ret[idx2] = None
-        return tuple(ret)
-
-      matches1 = defaultdict(list)
-      matches2 = defaultdict(list)
-      try:
-        for g1 in groups1:
-            matches1[make_key(g1)].append(g1[union[idx1]])
-        for g2 in groups2:
-            matches2[make_key(g2)].append(g2[union[idx2]])
-      except:
-        pdb.set_trace()
-
-      seen = set()
-
-      for key in matches1.keys():
-        if key not in matches2:
-          continue
-
-        for v1 in matches1[key]:
-          for v2 in matches2[key]:
-            newg = list(key)
-            newg[idx1] = v1
-            newg[idx2] = v2
-            newg = tuple(newg)
-            if newg in seen:
-              continue
-            seen.add(newg)
-      return seen
-
-             
+            
